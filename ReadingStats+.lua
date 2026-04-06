@@ -880,6 +880,7 @@ function ReadingStatsTable:init()
         cell    = Font:getFace("NotoSans-Regular.ttf", 15),
         title   = Font:getFace("NotoSans-Regular.ttf", 18),
         title_main = Font:getFace("NotoSans-Bold.ttf", 20),
+        title_main = Font:getFace("NotoSans-Regular.ttf", 20),
         title_meta = Font:getFace("NotoSans-Regular.ttf", 14),
         meta    = Font:getFace("NotoSans-Regular.ttf", 15),
         session = Font:getFace("NotoSans-Regular.ttf", 16),
@@ -994,6 +995,7 @@ local title_main = TextWidget:new{
         visible_speed = string.format("%.0f %s", pph, _("pages/h"))
     end
     local avg_session_minutes = getAvgSessionMinutes(all_stats)
+    local avg_session_minutes = getAvgSessionMinutes(stats_data)
 
     local meta1 = TextWidget:new{
         text = string.format("%s: %s   ·   %s: %s",
