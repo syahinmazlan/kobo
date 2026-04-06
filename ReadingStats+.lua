@@ -4,10 +4,7 @@ Version: 2.11.1 (full title header and cleaner pace view)
 
 Notes:
 - Keeps the visual layout of the user's preferred version
-- Config dialog lets user choose:
-  * Daily mode
-  * Sessions mode
-- Preference is saved in G_reader_settings
+- Uses daily view only
 ]]--
 
 local Blitbuffer = require("ffi/blitbuffer")
@@ -53,14 +50,8 @@ local PATCH_L10N = {
         ["Avg session"] = "Avg session",
         ["Summary"] = "Summary",
         ["pages/h"] = "pages/h",
+        ["sec/page"] = "sec/page",
         ["days"] = "days",
-        ["Mode"] = "Mode",
-        ["daily"] = "daily",
-        ["sessions"] = "sessions",
-        ["Config"] = "[Config]",
-        ["Select mode"] = "Select mode",
-        ["Daily view"] = "Daily view",
-        ["Sessions view"] = "Sessions view",
         ["No data"] = "No data",
         ["avg"] = "avg",
         ["min"] = "min",
@@ -89,28 +80,6 @@ local ROWS_PER_PAGE = 6
 local SPEED_MIN_DURATION_SECONDS = 120
 local SPEED_MIN_PAGES = 3
 local _current_page = 1
-
-local function getMode()
-    if G_reader_settings and G_reader_settings.readSetting then
-        local mode = G_reader_settings:readSetting("reading_stats_mode") or "daily"
-        if mode ~= "daily" and mode ~= "sessions" then
-            mode = "sessions"
-        end
-        return mode
-    end
-    return "daily"
-end
-
-local function setMode(mode)
-    if G_reader_settings and G_reader_settings.saveSetting then
-        G_reader_settings:saveSetting("reading_stats_mode", mode)
-    end
-end
-
-local function modeLabel(mode)
-    if mode == "sessions" then return _("sessions") end
-    return _("daily")
-end
 
 local function truncateTitle(title, max_chars)
     if not title then return "" end
@@ -217,6 +186,15 @@ local function formatSpeed(pages, duration)
     end
     local pph = (pages * 3600) / duration
     return string.format("%.0f", pph)
+end
+
+local function formatSecPerPage(duration, pages)
+    duration = tonumber(duration) or 0
+    pages = tonumber(pages) or 0
+    if duration <= 0 or pages <= 0 then
+        return "-"
+    end
+    return string.format("%.1f", duration / pages)
 end
 
 local function formatRange(first_page, last_page)
@@ -729,131 +707,6 @@ local ReadingStatsTable = InputContainer:extend{
     ui = nil,
 }
 
-local ConfigPopup = InputContainer:extend{
-    modal = true,
-    parent_popup = nil,
-}
-
-function ConfigPopup:init()
-    self.screen_w = Screen:getWidth()
-    self.screen_h = Screen:getHeight()
-    self.dimen = Geom:new{ w = self.screen_w, h = self.screen_h }
-
-    self.fonts = {
-        title = Font:getFace("NotoSans-Regular.ttf", 18),
-        item = Font:getFace("NotoSans-Regular.ttf", 16),
-    }
-
-    local mode = getMode()
-    local options = {
-        { key = "daily", label = _("Daily view") },
-        { key = "sessions", label = _("Sessions view") },
-    }
-
-    local content = VerticalGroup:new{ align = "left" }
-    local title_frame = FrameContainer:new{
-        background = Blitbuffer.COLOR_WHITE,
-        bordersize = 0,
-        padding_top = Size.padding.default,
-        padding_bottom = Size.padding.small,
-        padding_left = Size.padding.default,
-        padding_right = Size.padding.default,
-        TextWidget:new{ text = _("Select mode"), face = self.fonts.title },
-    }
-    table.insert(content, title_frame)
-
-    self._option_hits = {}
-    local current_y = title_frame:getSize().h
-
-    for _, opt in ipairs(options) do
-        local prefix = (mode == opt.key) and "● " or "○ "
-        local option_frame = FrameContainer:new{
-            background = Blitbuffer.COLOR_WHITE,
-            bordersize = 0,
-            padding_top = Size.padding.small,
-            padding_bottom = Size.padding.small,
-            padding_left = Size.padding.default,
-            padding_right = Size.padding.default,
-            TextWidget:new{ text = prefix .. opt.label, face = self.fonts.item },
-        }
-        local h = option_frame:getSize().h
-        table.insert(self._option_hits, {
-            key = opt.key,
-            y_min_rel = current_y,
-            y_max_rel = current_y + h,
-        })
-        current_y = current_y + h
-        table.insert(content, option_frame)
-    end
-
-    self.popup = FrameContainer:new{
-        background = Blitbuffer.COLOR_WHITE,
-        bordersize = math.max(Size.line.thin, 1),
-        padding = 0,
-        radius = 0,
-        width = math.floor(self.screen_w * 0.46),
-        content,
-    }
-
-    local pw = self.popup:getSize().w
-    local ph = self.popup:getSize().h
-    self.popup_x = math.floor((self.screen_w - pw) / 2)
-    self.popup_y = math.floor((self.screen_h - ph) / 2)
-    self.popup_w = pw
-    self.popup_h = ph
-
-    self[1] = CenterContainer:new{
-        dimen = self.dimen,
-        self.popup,
-    }
-
-    if Device:isTouchDevice() then
-        self.ges_events.TapSelect = {
-            GestureRange:new{
-                ges = "tap",
-                range = self.dimen,
-            }
-        }
-    end
-    if Device:hasKeys() then
-        self.key_events.AnyKeyPressed = { { Device.input.group.Any } }
-    end
-end
-
-function ConfigPopup:onTapSelect(arg, ges_ev)
-    if ges_ev and ges_ev.pos then
-        local x = ges_ev.pos.x
-        local y = ges_ev.pos.y
-        if x >= self.popup_x and x <= (self.popup_x + self.popup_w) and y >= self.popup_y and y <= (self.popup_y + self.popup_h) then
-            local y_rel = y - self.popup_y
-            for _, hit in ipairs(self._option_hits) do
-                if y_rel >= hit.y_min_rel and y_rel <= hit.y_max_rel then
-                    setMode(hit.key)
-                    local ui_ref = self.parent_popup and self.parent_popup.ui
-                    UIManager:close(self)
-                    if self.parent_popup then
-                        UIManager:close(self.parent_popup)
-                    end
-                    UIManager:scheduleIn(0, function()
-                        _current_page = 1
-                        UIManager:show(ReadingStatsTable:new{ ui = ui_ref })
-                    end)
-                    return true
-                end
-            end
-            return true
-        end
-    end
-    UIManager:close(self)
-    return true
-end
-
-function ConfigPopup:onAnyKeyPressed()
-    UIManager:close(self)
-    return true
-end
-
-
 function ReadingStatsTable:init()
     local screen_w = Screen:getWidth()
     local screen_h = Screen:getHeight()
@@ -864,15 +717,12 @@ function ReadingStatsTable:init()
         header  = Font:getFace("NotoSans-Regular.ttf", 14),
         cell    = Font:getFace("NotoSans-Regular.ttf", 15),
         title   = Font:getFace("NotoSans-Regular.ttf", 18),
-        title_main = Font:getFace("NotoSans-Bold.ttf", 19),
-        title_meta = Font:getFace("NotoSans-Regular.ttf", 13),
+        title_main = Font:getFace("NotoSans-Regular.ttf", 19),
         title_author = Font:getFace("NotoSans-Regular.ttf", 13),
-        title_main = Font:getFace("NotoSans-Regular.ttf", 20),
         title_meta = Font:getFace("NotoSans-Regular.ttf", 14),
         meta    = Font:getFace("NotoSans-Regular.ttf", 15),
         session = Font:getFace("NotoSans-Regular.ttf", 16),
         summary = Font:getFace("NotoSans-Regular.ttf", 15),
-        config  = Font:getFace("NotoSans-Regular.ttf", 10),
     }
 
     self.layout = buildLayout(screen_w, Size.padding.default, Screen:scaleBySize(4))
@@ -899,29 +749,14 @@ function ReadingStatsTable:buildContent()
     end
 
     local book_id = self.stats_plugin and self.stats_plugin.id_curr_book
-    local mode = getMode()
-
-    local all_stats
     local daily_stats = getDailyStats(book_id, 365)
-    if mode == "daily" then
-        all_stats = daily_stats
-    else
-        all_stats = getSessionStats(book_id, 365)
-    end
+    local all_stats = daily_stats
 
     local book_title = getBookTitle(self.ui)
     local book_author = getBookAuthor(self.ui)
     local days_read = getTotalDaysRead(book_id)
 
     local display_stats = all_stats
-    if mode == "sessions" then
-        display_stats = {}
-        for _, row in ipairs(all_stats) do
-            if formatSpeed(row.pages, row.duration) ~= "-" then
-                table.insert(display_stats, row)
-            end
-        end
-    end
 
     local total_rows = #display_stats
     local total_pages = math.max(1, math.ceil(total_rows / ROWS_PER_PAGE))
@@ -961,41 +796,15 @@ function ReadingStatsTable:buildContent()
         title_meta,
     }
 
-
-    local config_text = TextWidget:new{
-        text = _("Config"),
-        face = self.fonts.config or self.fonts.cell
-    }
-
-    local config_gap_w = 12
-    local config_w = config_text:getSize().w
-    local title_col_w = self.screen_w - 2 * self.layout.padding_h - config_w - config_gap_w
-    if title_col_w < math.floor(self.screen_w * 0.34) then
-        title_col_w = math.floor(self.screen_w * 0.34)
-    end
-    local title_row = HorizontalGroup:new{
-        align = "center",
-        fixedCol(title, title_col_w),
-        HorizontalSpan:new{ width = config_gap_w },
-        fixedCol(config_text, config_w),
-    }
+    local title_row = title
 
     local total_book_time = sumDuration(daily_stats)
     local actual_book_time = getActualReadingTotal(book_id, 5, 120)
-    local all_time = sumDuration(all_stats)
     local all_pages = sumPages(all_stats)
     local all_delta = sumDelta(all_stats)
-    local valid_pages_total, valid_duration_total, valid_sessions_total = getValidSessionTotals(all_stats)
     local visible_time = sumDuration(stats_data)
     local visible_pages = sumPages(stats_data)
-    local visible_delta = sumDelta(stats_data)
-    local visible_speed = "-"
-    if valid_sessions_total > 0 and valid_duration_total > 0 then
-        local pph = (valid_pages_total * 3600) / valid_duration_total
-        visible_speed = string.format("%.0f %s", pph, _("pages/h"))
-    end
-    local avg_session_minutes = getAvgSessionMinutes(all_stats)
-    local avg_session_minutes = getAvgSessionMinutes(stats_data)
+    local visible_sec_per_page = formatSecPerPage(visible_time, visible_pages)
 
     local meta1 = TextWidget:new{
         text = string.format("%s: %s   ·   %s: %s",
@@ -1005,14 +814,8 @@ function ReadingStatsTable:buildContent()
     }
 
     local meta2 = TextWidget:new{
-        text = string.format("%s: %s   ·   %d p   ·   %s   ·   %s: %s",
-            visible_label, formatDurationCompact(visible_time), visible_pages, visible_speed,
-            _("Avg session"), avg_session_minutes),
-        face = self.fonts.meta,
-    }
-
-    local meta3 = TextWidget:new{
-        text = string.format("%s: %s", _("Mode"), modeLabel(mode)),
+        text = string.format("%s: %s",
+            _("sec/page"), visible_sec_per_page),
         face = self.fonts.meta,
     }
 
@@ -1033,9 +836,8 @@ function ReadingStatsTable:buildContent()
     }
 
     local summary_widget = TextWidget:new{
-        text = string.format("%s: %s · %d p · %s · %s · %s: %s",
-            _("Summary"), formatProgressDelta(all_delta), all_pages, formatDurationCompact(all_time),
-            visible_speed, _("Avg session"), avg_session_minutes),
+        text = string.format("%s: %s · %d p",
+            _("Summary"), formatProgressDelta(all_delta), all_pages),
         face = self.fonts.summary,
     }
 
@@ -1073,16 +875,6 @@ function ReadingStatsTable:buildContent()
 
     local current_y = title_frame:getSize().h + meta1_frame:getSize().h + meta2_frame:getSize().h
         + session_frame:getSize().h + header:getSize().h + rows_frame:getSize().h + summary_frame:getSize().h
-
-    local btn_y_min = 0
-    local btn_y_max = title_frame:getSize().h
-    local row_start_x = self.screen_w - self.layout.padding_h - config_w
-    self._config_hit = {
-        x_min = row_start_x,
-        x_max = row_start_x + config_w,
-        y_min = btn_y_min,
-        y_max = btn_y_max,
-    }
 
     self._chart_hit = nil
 
@@ -1136,11 +928,6 @@ function ReadingStatsTable:onTapClose(arg, ges_ev)
     if ges_ev and ges_ev.pos then
         local tx = ges_ev.pos.x
         local ty = ges_ev.pos.y
-
-        if self._config_hit and tx >= self._config_hit.x_min and tx <= self._config_hit.x_max and ty >= self._config_hit.y_min and ty <= self._config_hit.y_max then
-            UIManager:show(ConfigPopup:new{ parent_popup = self })
-            return true
-        end
 
         local bar_y = self._pagination_bar_y or 0
         local popup_bot = self._popup_bottom_y or 0
