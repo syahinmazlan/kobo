@@ -50,6 +50,7 @@ local PATCH_L10N = {
         ["Avg session"] = "Avg session",
         ["Summary"] = "Summary",
         ["pages/h"] = "pages/h",
+        ["sec/page"] = "sec/page",
         ["days"] = "days",
         ["No data"] = "No data",
         ["avg"] = "avg",
@@ -185,6 +186,15 @@ local function formatSpeed(pages, duration)
     end
     local pph = (pages * 3600) / duration
     return string.format("%.0f", pph)
+end
+
+local function formatSecPerPage(duration, pages)
+    duration = tonumber(duration) or 0
+    pages = tonumber(pages) or 0
+    if duration <= 0 or pages <= 0 then
+        return "-"
+    end
+    return string.format("%.1f", duration / pages)
 end
 
 local function formatRange(first_page, last_page)
@@ -710,7 +720,7 @@ function ReadingStatsTable:init()
         title_main = Font:getFace("NotoSans-Bold.ttf", 19),
         title_meta = Font:getFace("NotoSans-Regular.ttf", 13),
         title_author = Font:getFace("NotoSans-Regular.ttf", 13),
-        title_main = Font:getFace("NotoSans-Regular.ttf", 20),
+        title_main = Font:getFace("NotoSans-Regular.ttf", 19),
         title_meta = Font:getFace("NotoSans-Regular.ttf", 14),
         meta    = Font:getFace("NotoSans-Regular.ttf", 15),
         session = Font:getFace("NotoSans-Regular.ttf", 16),
@@ -792,12 +802,11 @@ function ReadingStatsTable:buildContent()
 
     local total_book_time = sumDuration(daily_stats)
     local actual_book_time = getActualReadingTotal(book_id, 5, 120)
-    local all_time = sumDuration(all_stats)
     local all_pages = sumPages(all_stats)
     local all_delta = sumDelta(all_stats)
-    local valid_pages_total, valid_duration_total, valid_sessions_total = getValidSessionTotals(all_stats)
     local visible_time = sumDuration(stats_data)
     local visible_pages = sumPages(stats_data)
+    local visible_sec_per_page = formatSecPerPage(visible_time, visible_pages)
     local visible_label = _("Visible period")
     local visible_speed = "-"
     if valid_sessions_total > 0 and valid_duration_total > 0 then
@@ -815,6 +824,8 @@ function ReadingStatsTable:buildContent()
     }
 
     local meta2 = TextWidget:new{
+        text = string.format("%s: %s",
+            _("sec/page"), visible_sec_per_page),
         text = string.format("%s: %s   ·   %d p   ·   %s   ·   %s: %s",
             visible_label, formatDurationCompact(visible_time), visible_pages, visible_speed,
             _("Avg session"), avg_session_minutes),
@@ -838,9 +849,8 @@ function ReadingStatsTable:buildContent()
     }
 
     local summary_widget = TextWidget:new{
-        text = string.format("%s: %s · %d p · %s · %s · %s: %s",
-            _("Summary"), formatProgressDelta(all_delta), all_pages, formatDurationCompact(all_time),
-            visible_speed, _("Avg session"), avg_session_minutes),
+        text = string.format("%s: %s · %d p",
+            _("Summary"), formatProgressDelta(all_delta), all_pages),
         face = self.fonts.summary,
     }
 
