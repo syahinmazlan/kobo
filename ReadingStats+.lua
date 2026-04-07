@@ -838,9 +838,8 @@ function ReadingStatsTable:buildContent()
     }
 
     local summary_widget = TextWidget:new{
-        text = string.format("%s: %s · %d p · %s · %s · %s: %s",
-            _("Summary"), formatProgressDelta(all_delta), all_pages, formatDurationCompact(all_time),
-            visible_speed, _("Avg session"), avg_session_minutes),
+        text = string.format("%s: %s · %d p · %s",
+            _("Summary"), formatProgressDelta(all_delta), all_pages, formatDurationCompact(all_time)),
         face = self.fonts.summary,
     }
 
