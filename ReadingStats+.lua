@@ -44,7 +44,7 @@ local PATCH_L10N = {
         ["Days Read"] = "days",
         ["reading in this session"] = "reading in this session",
         ["Book total"] = "Book total",
-        ["Actual reading total"] = "Actual reading total",
+        ["Actual reading total"] = "Actual reading",
         ["Visible period"] = "Visible period",
         ["Visible sessions"] = "Visible sessions",
         ["Daily avg"] = "Daily avg",
@@ -79,7 +79,7 @@ local function _(msg)
 end
 
 local stats_db_path = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
-local ROWS_PER_PAGE = 6
+local ROWS_PER_PAGE = 7
 local SPEED_MIN_DURATION_SECONDS = 120
 local SPEED_MIN_PAGES = 3
 local _current_page = 1
@@ -809,10 +809,9 @@ function ReadingStatsTable:init()
         header  = Font:getFace("NotoSans-Regular.ttf", 14),
         cell    = Font:getFace("NotoSans-Regular.ttf", 15),
         title   = Font:getFace("NotoSans-Regular.ttf", 18),
-        title_main = Font:getFace("NotoSans-Bold.ttf", 19),
+        title_main = Font:getFace("NotoSans-Bold.ttf", 20),
         title_meta = Font:getFace("NotoSans-Regular.ttf", 13),
         title_author = Font:getFace("NotoSans-Regular.ttf", 13),
-        title_main = Font:getFace("NotoSans-Regular.ttf", 20),
         title_meta = Font:getFace("NotoSans-Regular.ttf", 14),
         meta    = Font:getFace("NotoSans-Regular.ttf", 15),
         session = Font:getFace("NotoSans-Regular.ttf", 16),
