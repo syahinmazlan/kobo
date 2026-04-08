@@ -54,6 +54,8 @@ local PATCH_L10N = {
         ["pages/h"] = "pg/hr",
         ["pg/session"] = "pg/session",
         ["%/hr"] = "%/hr",
+        ["total"] = "total",
+        ["gain"] = "gain",
         ["days"] = "days",
         ["No data"] = "No data",
         ["avg"] = "avg",
@@ -815,6 +817,7 @@ function ReadingStatsTable:init()
         title_meta = Font:getFace("NotoSans-Regular.ttf", 14),
         meta    = Font:getFace("NotoSans-Regular.ttf", 15),
         session = Font:getFace("NotoSans-Regular.ttf", 16),
+        session_bold = Font:getFace("NotoSans-Bold.ttf", 16),
         summary = Font:getFace("NotoSans-Regular.ttf", 15),
     }
 
@@ -899,7 +902,6 @@ function ReadingStatsTable:buildContent()
     local title_row = title
 
     local all_time = sumDuration(all_stats)
-    local all_delta = sumDelta(all_stats)
     local valid_pages_total, valid_duration_total, valid_sessions_total = getValidSessionTotals(all_stats)
     local visible_speed = "-"
     if valid_sessions_total > 0 and valid_duration_total > 0 then
@@ -950,8 +952,9 @@ function ReadingStatsTable:buildContent()
     }
 
     local stats_height = math.max(left_stats:getSize().h, right_stats:getSize().h)
+    local partition_height = math.max(1, stats_height - (Size.padding.small or 4))
     local stats_partition = LineWidget:new{
-        dimen = Geom:new{ w = Size.line.medium, h = stats_height },
+        dimen = Geom:new{ w = Size.line.medium, h = partition_height },
         background = Blitbuffer.COLOR_BLACK,
     }
 
@@ -974,15 +977,39 @@ function ReadingStatsTable:buildContent()
         end
     end
 
-    local session_widget = TextWidget:new{
-        text = string.format("%s %s", formatSeconds(session_duration), _("reading in this session")),
-        face = self.fonts.session or self.fonts.cell,
+    local session_widget = HorizontalGroup:new{
+        TextWidget:new{
+            text = "This session: ",
+            face = self.fonts.session or self.fonts.cell,
+        },
+        TextWidget:new{
+            text = formatSeconds(session_duration),
+            face = self.fonts.session_bold or self.fonts.session or self.fonts.cell,
+        },
     }
 
     local summary_widget = TextWidget:new{
-        text = string.format("%s: %s · %s",
-            _("Summary"), formatProgressDelta(all_delta), formatDurationCompact(all_time)),
+        text = string.format("%s: %s · %s %s · %s %s",
+            _("Summary"),
+            formatDurationCompact(all_time),
+            formatProgressTotal((all_stats[1] and all_stats[1].progress) or 0), _("total"),
+            formatProgressDelta((all_stats[1] and all_stats[1].delta_progress) or 0), _("gain")),
         face = self.fonts.summary,
+    }
+
+    local summary_meta_widget = TextWidget:new{
+        text = string.format("%s: %s · %s · %s %s",
+            _("Daily avg"), formatHoursMinutes(daily_avg_seconds),
+            visible_speed,
+            progress_efficiency, _("%/hr")),
+        face = self.fonts.meta,
+    }
+
+    local summary_block = VerticalGroup:new{
+        align = "left",
+        summary_widget,
+        VerticalSpan:new{ height = Size.padding.tiny or 2 },
+        summary_meta_widget,
     }
 
     local header = buildTableHeader(self.fonts, self.layout)
@@ -1006,7 +1033,7 @@ function ReadingStatsTable:buildContent()
     local stats_frame = makeFrame(stats_widget, 0, Size.padding.tiny or 2)
     local session_frame = makeFrame(session_widget, 0, Size.padding.small)
     local rows_frame = makeFrame(rows, Size.padding.small, Size.padding.small)
-    local summary_frame = makeFrame(summary_widget, Size.padding.small, Size.padding.small)
+    local summary_frame = makeFrame(summary_block, Size.padding.small, Size.padding.small)
 
     table.insert(table_content, title_frame)
     table.insert(table_content, stats_frame)
