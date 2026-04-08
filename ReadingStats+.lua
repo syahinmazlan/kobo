@@ -445,19 +445,21 @@ local function getTotalDaysRead(book_id)
     return tonumber(result) or 0
 end
 
-local function getActualReadingTotal(book_id, min_seconds, max_seconds)
+local function getActualReadingTotal(book_id, max_seconds)
     if not book_id then return 0 end
-    min_seconds = tonumber(min_seconds) or 5
     max_seconds = tonumber(max_seconds) or 120
     local conn = getDB()
     if not conn then return 0 end
     local sql = string.format([[
-        SELECT COALESCE(sum(ps.duration), 0)
-        FROM page_stat_data ps
-        WHERE ps.id_book = %d
-          AND ps.duration BETWEEN %d AND %d;
-    ]], book_id, min_seconds, max_seconds)
-    local result = conn:rowexec(sql)
+        SELECT count(*), COALESCE(sum(durations), 0)
+        FROM (
+            SELECT min(sum(duration), %d) AS durations
+            FROM page_stat
+            WHERE id_book = %d
+            GROUP BY page
+        );
+    ]], max_seconds, book_id)
+    local _, result = conn:rowexec(sql)
     conn:close()
     return tonumber(result) or 0
 end
@@ -825,7 +827,7 @@ function ReadingStatsTable:buildContent()
     local title_row = title
 
     local total_book_time = sumDuration(daily_stats)
-    local actual_book_time = getActualReadingTotal(book_id, 5, 120)
+    local actual_book_time = getActualReadingTotal(book_id, 120)
     local all_time = sumDuration(all_stats)
     local all_delta = sumDelta(all_stats)
     local valid_pages_total, valid_duration_total, valid_sessions_total = getValidSessionTotals(all_stats)
