@@ -211,12 +211,17 @@ local function formatSpeed(pages, duration)
     return string.format("%.0f", pph)
 end
 
-local function formatRange(first_page, last_page)
+local function formatRange(first_page, last_page, max_page)
     if first_page == nil and last_page == nil then
         return "-"
     end
     first_page = tonumber(first_page)
     last_page = tonumber(last_page)
+    max_page = tonumber(max_page)
+    if max_page and max_page > 0 then
+        if first_page then first_page = math.min(first_page, max_page) end
+        if last_page then last_page = math.min(last_page, max_page) end
+    end
     if first_page and last_page then
         if first_page == last_page then
             return tostring(first_page)
@@ -234,10 +239,11 @@ local function getDB()
     return SQ3.open(stats_db_path)
 end
 
-local function getDailyStats(book_id, days)
+local function getDailyStats(book_id, days, effective_total_pages)
     if not book_id or not days or days <= 0 then return {} end
     local conn = getDB()
     if not conn then return {} end
+    local divisor = tonumber(effective_total_pages) or 0
 
     local sql = string.format([[
         SELECT
@@ -261,13 +267,58 @@ local function getDailyStats(book_id, days)
              WHERE ps4.id_book = ps.id_book
                AND date(ps4.start_time, 'unixepoch', 'localtime') = date(ps.start_time, 'unixepoch', 'localtime')
              ORDER BY ps4.start_time DESC
-             LIMIT 1) AS total_percentage
+             LIMIT 1) AS total_percentage,
+            (SELECT ps5.total_pages
+             FROM page_stat_data ps5
+             WHERE ps5.id_book = ps.id_book
+               AND date(ps5.start_time, 'unixepoch', 'localtime') = date(ps.start_time, 'unixepoch', 'localtime')
+             ORDER BY ps5.start_time DESC
+             LIMIT 1) AS day_total_pages
         FROM page_stat_data ps
         WHERE ps.id_book = %d
           AND date(ps.start_time, 'unixepoch', 'localtime') >= date('now', '-' || %d || ' days')
         GROUP BY date(ps.start_time, 'unixepoch', 'localtime')
         ORDER BY dates DESC;
     ]], book_id, days)
+
+    if divisor > 0 then
+        sql = string.format([[
+            SELECT
+                date(ps.start_time, 'unixepoch', 'localtime') AS dates,
+                count(DISTINCT ps.page) AS pages,
+                sum(ps.duration) AS durations,
+                (SELECT ps2.page
+                 FROM page_stat_data ps2
+                 WHERE ps2.id_book = ps.id_book
+                   AND date(ps2.start_time, 'unixepoch', 'localtime') = date(ps.start_time, 'unixepoch', 'localtime')
+                 ORDER BY ps2.start_time ASC
+                 LIMIT 1) AS first_page,
+                (SELECT ps3.page
+                 FROM page_stat_data ps3
+                 WHERE ps3.id_book = ps.id_book
+                   AND date(ps3.start_time, 'unixepoch', 'localtime') = date(ps.start_time, 'unixepoch', 'localtime')
+                 ORDER BY ps3.start_time DESC
+                 LIMIT 1) AS last_page,
+                (SELECT min(1.0, (ps4.page * 1.0 / %d))
+                 FROM page_stat_data ps4
+                 WHERE ps4.id_book = ps.id_book
+                   AND date(ps4.start_time, 'unixepoch', 'localtime') = date(ps.start_time, 'unixepoch', 'localtime')
+                   AND ps4.page <= %d
+                 ORDER BY ps4.start_time DESC
+                 LIMIT 1) AS total_percentage,
+                (SELECT ps5.total_pages
+                 FROM page_stat_data ps5
+                 WHERE ps5.id_book = ps.id_book
+                   AND date(ps5.start_time, 'unixepoch', 'localtime') = date(ps.start_time, 'unixepoch', 'localtime')
+                 ORDER BY ps5.start_time DESC
+                 LIMIT 1) AS day_total_pages
+            FROM page_stat_data ps
+            WHERE ps.id_book = %d
+              AND date(ps.start_time, 'unixepoch', 'localtime') >= date('now', '-' || %d || ' days')
+            GROUP BY date(ps.start_time, 'unixepoch', 'localtime')
+            ORDER BY dates DESC;
+        ]], divisor, divisor, book_id, days)
+    end
 
     local results = conn:exec(sql)
     conn:close()
@@ -281,6 +332,7 @@ local function getDailyStats(book_id, days)
                 duration = tonumber(results.durations[i]) or 0,
                 first_page = tonumber(results.first_page[i]),
                 last_page = tonumber(results.last_page[i]),
+                total_pages = tonumber(results.day_total_pages[i]) or 0,
                 progress = tonumber(results.total_percentage[i]) or 0,
                 delta_progress = 0,
             })
@@ -452,6 +504,26 @@ local function getBookAuthor(ui)
         author = table.concat(author, ", ")
     end
     return tostring(author)
+end
+
+local function getEffectiveTotalPages(ui)
+    if not ui or not ui.document then
+        return nil
+    end
+    local doc = ui.document
+
+    if doc.hasHiddenFlows and doc:hasHiddenFlows()
+        and ui.getCurrentPage and doc.getPageFlow and doc.getTotalPagesInFlow then
+        local current_page = ui:getCurrentPage()
+        if current_page then
+            local flow = doc:getPageFlow(current_page)
+            local flow_total = flow and doc:getTotalPagesInFlow(flow) or nil
+            if flow_total and flow_total > 0 then
+                return flow_total
+            end
+        end
+    end
+    return nil
 end
 
 local function getTotalDaysRead(book_id)
@@ -688,14 +760,20 @@ end
 
 local function buildTableRows(stats_data, fonts, layout)
     local rows = VerticalGroup:new{ align = "left" }
+    local today_iso = os.date("%Y-%m-%d")
+    local highlight_latest = stats_data[1] and stats_data[1].date == today_iso
     for idx, item in ipairs(stats_data) do
+        local value_face = (highlight_latest and idx == 1 and (fonts.cell_bold or fonts.cell)) or fonts.cell
         local date_widget = TextWidget:new{ text = formatDate(item.date), face = fonts.cell }
-        local time_widget = TextWidget:new{ text = formatDurationCompact(item.duration), face = fonts.cell }
-        local pages_widget = TextWidget:new{ text = tostring(item.pages), face = fonts.cell }
-        local speed_widget = TextWidget:new{ text = formatSpeed(item.pages, item.duration), face = fonts.cell }
-        local delta_widget = TextWidget:new{ text = formatProgressDelta(item.delta_progress), face = fonts.cell }
+        local time_widget = TextWidget:new{ text = formatDurationCompact(item.duration), face = value_face }
+        local pages_widget = TextWidget:new{ text = tostring(item.pages), face = value_face }
+        local speed_widget = TextWidget:new{ text = formatSpeed(item.pages, item.duration), face = value_face }
+        local delta_widget = TextWidget:new{ text = formatProgressDelta(item.delta_progress), face = value_face }
         local total_widget = TextWidget:new{ text = formatProgressTotal(item.progress), face = fonts.cell }
-        local range_widget = TextWidget:new{ text = formatRange(item.first_page, item.last_page), face = fonts.cell }
+        local range_widget = TextWidget:new{
+            text = formatRange(item.first_page, item.last_page, item.total_pages),
+            face = fonts.cell
+        }
 
         local row = HorizontalGroup:new{
             align = "center",
@@ -810,6 +888,7 @@ function ReadingStatsTable:init()
     self.fonts = {
         header  = Font:getFace("NotoSans-Regular.ttf", 14),
         cell    = Font:getFace("NotoSans-Regular.ttf", 15),
+        cell_bold = Font:getFace("NotoSans-Bold.ttf", 15),
         title   = Font:getFace("NotoSans-Regular.ttf", 18),
         title_main = Font:getFace("NotoSans-Bold.ttf", 20),
         title_meta = Font:getFace("NotoSans-Regular.ttf", 13),
@@ -845,7 +924,8 @@ function ReadingStatsTable:buildContent()
     end
 
     local book_id = self.stats_plugin and self.stats_plugin.id_curr_book
-    local daily_stats = getDailyStats(book_id, 365)
+    local effective_total_pages = getEffectiveTotalPages(self.ui)
+    local daily_stats = getDailyStats(book_id, 365, effective_total_pages)
     local session_stats = getSessionStats(book_id, 365)
     local all_stats = daily_stats
 
@@ -997,20 +1077,7 @@ function ReadingStatsTable:buildContent()
         face = self.fonts.summary,
     }
 
-    local summary_meta_widget = TextWidget:new{
-        text = string.format("%s: %s · %s · %s %s",
-            _("Daily avg"), formatHoursMinutes(daily_avg_seconds),
-            visible_speed,
-            progress_efficiency, _("%/hr")),
-        face = self.fonts.meta,
-    }
-
-    local summary_block = VerticalGroup:new{
-        align = "left",
-        summary_widget,
-        VerticalSpan:new{ height = Size.padding.tiny or 2 },
-        summary_meta_widget,
-    }
+    local summary_block = summary_widget
 
     local header = buildTableHeader(self.fonts, self.layout)
     local rows = buildTableRows(stats_data, self.fonts, self.layout)
