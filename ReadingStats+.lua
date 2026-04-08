@@ -47,9 +47,13 @@ local PATCH_L10N = {
         ["Actual reading total"] = "Actual reading total",
         ["Visible period"] = "Visible period",
         ["Visible sessions"] = "Visible sessions",
+        ["Daily avg"] = "Daily avg",
         ["Avg session"] = "Avg session",
+        ["Med session"] = "Med session",
         ["Summary"] = "Summary",
-        ["pages/h"] = "pages/h",
+        ["pages/h"] = "pg/hr",
+        ["pg/session"] = "pg/session",
+        ["%/hr"] = "%/hr",
         ["days"] = "days",
         ["No data"] = "No data",
         ["avg"] = "avg",
@@ -167,6 +171,17 @@ local function formatDurationCompact(seconds)
     else
         return string.format("%dm", minutes)
     end
+end
+
+local function formatSessionLength(seconds)
+    if not seconds or seconds <= 0 then
+        return "-"
+    end
+    local minutes = seconds / 60
+    if minutes < 60 then
+        return string.format("%.1f %s", minutes, _("min"))
+    end
+    return formatDurationCompact(seconds)
 end
 
 local function formatProgressDelta(delta)
@@ -444,19 +459,21 @@ local function getTotalDaysRead(book_id)
     return tonumber(result) or 0
 end
 
-local function getActualReadingTotal(book_id, min_seconds, max_seconds)
+local function getActualReadingTotal(book_id, max_seconds)
     if not book_id then return 0 end
-    min_seconds = tonumber(min_seconds) or 5
     max_seconds = tonumber(max_seconds) or 120
     local conn = getDB()
     if not conn then return 0 end
     local sql = string.format([[
-        SELECT COALESCE(sum(ps.duration), 0)
-        FROM page_stat_data ps
-        WHERE ps.id_book = %d
-          AND ps.duration BETWEEN %d AND %d;
-    ]], book_id, min_seconds, max_seconds)
-    local result = conn:rowexec(sql)
+        SELECT count(*), COALESCE(sum(durations), 0)
+        FROM (
+            SELECT min(sum(duration), %d) AS durations
+            FROM page_stat
+            WHERE id_book = %d
+            GROUP BY page
+        );
+    ]], max_seconds, book_id)
+    local _, result = conn:rowexec(sql)
     conn:close()
     return tonumber(result) or 0
 end
@@ -485,22 +502,101 @@ local function sumDelta(stats)
     return total
 end
 
-local function getAvgSessionMinutes(stats)
+local function getDailyAverageMinutes(stats)
+    local total_time = sumDuration(stats)
+    local total_days = #(stats or {})
+    if total_days == 0 then
+        return "-"
+    end
+    local avg_minutes = (total_time / total_days) / 60
+    return string.format("%.1f %s", avg_minutes, _("min"))
+end
+
+local function getFilteredSessionStatsByDates(session_stats, daily_rows)
+    local allowed_dates = {}
+    for _, row in ipairs(daily_rows or {}) do
+        if row and row.date then
+            allowed_dates[row.date] = true
+        end
+    end
+
+    local filtered = {}
+    for _, session in ipairs(session_stats or {}) do
+        if session and session.date and allowed_dates[session.date] then
+            table.insert(filtered, session)
+        end
+    end
+    return filtered
+end
+
+local function formatAvgSessionLength(stats)
     local valid_count = 0
-    local actual_time = 0
+    local total_seconds = 0
     for _, row in ipairs(stats or {}) do
         local pages = tonumber(row.pages) or 0
         local duration = tonumber(row.duration) or 0
         if pages > 1 and duration >= 60 then
             valid_count = valid_count + 1
-            actual_time = actual_time + duration
+            total_seconds = total_seconds + duration
         end
     end
     if valid_count == 0 then
         return "-"
     end
-    local avg_minutes = (actual_time / valid_count) / 60
-    return string.format("%.1f %s", avg_minutes, _("min"))
+
+    local avg_seconds = total_seconds / valid_count
+    return formatSessionLength(avg_seconds)
+end
+
+local function getMedianSessionLength(stats)
+    local durations = {}
+    for _, row in ipairs(stats or {}) do
+        local pages = tonumber(row.pages) or 0
+        local duration = tonumber(row.duration) or 0
+        if pages > 1 and duration >= 60 then
+            table.insert(durations, duration)
+        end
+    end
+    if #durations == 0 then
+        return "-"
+    end
+    table.sort(durations)
+    local n = #durations
+    local median
+    if n % 2 == 1 then
+        median = durations[(n + 1) / 2]
+    else
+        median = (durations[n / 2] + durations[n / 2 + 1]) / 2
+    end
+    return formatSessionLength(median)
+end
+
+local function getPagesPerSession(stats)
+    local valid_count = 0
+    local total_pages = 0
+    for _, row in ipairs(stats or {}) do
+        local pages = tonumber(row.pages) or 0
+        local duration = tonumber(row.duration) or 0
+        if pages > 1 and duration >= 60 then
+            valid_count = valid_count + 1
+            total_pages = total_pages + pages
+        end
+    end
+    if valid_count == 0 then
+        return "-"
+    end
+    local avg_pages = total_pages / valid_count
+    return string.format("%.1f", avg_pages)
+end
+
+local function getProgressEfficiency(stats)
+    local total_delta = sumDelta(stats)
+    local total_seconds = sumDuration(stats)
+    if total_seconds <= 0 then
+        return "-"
+    end
+    local per_hour = (total_delta * 100) / (total_seconds / 3600)
+    return string.format("%.2f", per_hour)
 end
 
 local function getValidSessionTotals(stats)
@@ -742,6 +838,7 @@ function ReadingStatsTable:buildContent()
 
     local book_id = self.stats_plugin and self.stats_plugin.id_curr_book
     local daily_stats = getDailyStats(book_id, 365)
+    local session_stats = getSessionStats(book_id, 365)
     local all_stats = daily_stats
 
     local book_title = getBookTitle(self.ui)
@@ -791,21 +888,21 @@ function ReadingStatsTable:buildContent()
     local title_row = title
 
     local total_book_time = sumDuration(daily_stats)
-    local actual_book_time = getActualReadingTotal(book_id, 5, 120)
+    local actual_book_time = getActualReadingTotal(book_id, 120)
     local all_time = sumDuration(all_stats)
-    local all_pages = sumPages(all_stats)
     local all_delta = sumDelta(all_stats)
     local valid_pages_total, valid_duration_total, valid_sessions_total = getValidSessionTotals(all_stats)
-    local visible_time = sumDuration(stats_data)
-    local visible_pages = sumPages(stats_data)
-    local visible_label = _("Visible period")
     local visible_speed = "-"
     if valid_sessions_total > 0 and valid_duration_total > 0 then
         local pph = (valid_pages_total * 3600) / valid_duration_total
         visible_speed = string.format("%.0f %s", pph, _("pages/h"))
     end
-    local avg_session_minutes = getAvgSessionMinutes(all_stats)
-    local avg_session_minutes = getAvgSessionMinutes(stats_data)
+    local daily_avg_minutes = getDailyAverageMinutes(stats_data)
+    local visible_sessions = getFilteredSessionStatsByDates(session_stats, stats_data)
+    local avg_session_minutes = formatAvgSessionLength(visible_sessions)
+    local med_session_minutes = getMedianSessionLength(visible_sessions)
+    local pages_per_session = getPagesPerSession(visible_sessions)
+    local progress_efficiency = getProgressEfficiency(stats_data)
 
     local meta1 = TextWidget:new{
         text = string.format("%s: %s   ·   %s: %s",
@@ -815,9 +912,12 @@ function ReadingStatsTable:buildContent()
     }
 
     local meta2 = TextWidget:new{
-        text = string.format("%s: %s   ·   %d p   ·   %s   ·   %s: %s",
-            visible_label, formatDurationCompact(visible_time), visible_pages, visible_speed,
-            _("Avg session"), avg_session_minutes),
+        text = string.format("%s: %s   ·   %s: %s   ·   %s: %s   ·   %s: %s   ·   %s: %s   ·   %s",
+            _("Daily avg"), daily_avg_minutes,
+            _("Avg session"), avg_session_minutes,
+            _("Med session"), med_session_minutes,
+            _("pg/session"), pages_per_session,
+            _("%/hr"), progress_efficiency, visible_speed),
         face = self.fonts.meta,
     }
 
@@ -838,9 +938,8 @@ function ReadingStatsTable:buildContent()
     }
 
     local summary_widget = TextWidget:new{
-        text = string.format("%s: %s · %d p · %s · %s · %s: %s",
-            _("Summary"), formatProgressDelta(all_delta), all_pages, formatDurationCompact(all_time),
-            visible_speed, _("Avg session"), avg_session_minutes),
+        text = string.format("%s: %s · %s",
+            _("Summary"), formatProgressDelta(all_delta), formatDurationCompact(all_time)),
         face = self.fonts.summary,
     }
 
