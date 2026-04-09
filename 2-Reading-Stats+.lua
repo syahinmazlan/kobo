@@ -373,15 +373,6 @@ local function getSessionStats(book_id, days)
 
     local function finalizeSession(sess)
         if not sess then return end
-        local seen = {}
-        local page_count = 0
-        for _, page in ipairs(sess._pages_seen or {}) do
-            if not seen[page] then
-                seen[page] = true
-                page_count = page_count + 1
-            end
-        end
-        sess.pages = page_count
         sess._pages_seen = nil
         table.insert(sessions, sess)
     end
@@ -406,6 +397,7 @@ local function getSessionStats(book_id, days)
                 duration = 0,
                 progress = 0,
                 delta_progress = 0,
+                pages = 0,
                 last_time = row.start_time,
                 _pages_seen = {},
             }
@@ -414,7 +406,10 @@ local function getSessionStats(book_id, days)
         current.last_time = row.start_time
         current.last_page = row.page
         current.duration = current.duration + (row.duration or 0)
-        table.insert(current._pages_seen, row.page)
+        if not current._pages_seen[row.page] then
+            current._pages_seen[row.page] = true
+            current.pages = current.pages + 1
+        end
 
         if row.total_pages and row.total_pages > 0 then
             current.progress = row.page / row.total_pages
