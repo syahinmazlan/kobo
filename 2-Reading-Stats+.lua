@@ -85,6 +85,7 @@ local ROWS_PER_PAGE = 7
 local SPEED_MIN_DURATION_SECONDS = 120
 local SPEED_MIN_PAGES = 3
 local _current_page = 1
+local _stats_indexes_ensured = false
 
 local function truncateTitle(title, max_chars)
     if not title then return "" end
@@ -236,7 +237,23 @@ local function formatRange(first_page, last_page, max_page)
 end
 
 local function getDB()
-    return SQ3.open(stats_db_path)
+    local conn = SQ3.open(stats_db_path)
+    if conn and not _stats_indexes_ensured then
+        conn:exec([[
+            CREATE INDEX IF NOT EXISTS idx_psd_book_start
+            ON page_stat_data (id_book, start_time);
+        ]])
+        conn:exec([[
+            CREATE INDEX IF NOT EXISTS idx_psd_book_start_page
+            ON page_stat_data (id_book, start_time, page);
+        ]])
+        conn:exec([[
+            CREATE INDEX IF NOT EXISTS idx_ps_book_start_page
+            ON page_stat (id_book, start_time, page);
+        ]])
+        _stats_indexes_ensured = true
+    end
+    return conn
 end
 
 local function getDailyStats(book_id, days, effective_total_pages)
@@ -276,7 +293,7 @@ local function getDailyStats(book_id, days, effective_total_pages)
              LIMIT 1) AS day_total_pages
         FROM page_stat_data ps
         WHERE ps.id_book = %d
-          AND date(ps.start_time, 'unixepoch', 'localtime') >= date('now', '-' || %d || ' days')
+          AND ps.start_time >= CAST(strftime('%%s', date('now', 'localtime', '-' || %d || ' days')) AS INTEGER)
         GROUP BY date(ps.start_time, 'unixepoch', 'localtime')
         ORDER BY dates DESC;
     ]], book_id, days)
@@ -342,7 +359,7 @@ local function getRawReadingRows(book_id, days)
             ps.total_pages AS total_pages
         FROM page_stat_data ps
         WHERE ps.id_book = %d
-          AND date(ps.start_time, 'unixepoch', 'localtime') >= date('now', '-' || %d || ' days')
+          AND ps.start_time >= CAST(strftime('%%s', date('now', 'localtime', '-' || %d || ' days')) AS INTEGER)
         ORDER BY ps.start_time ASC;
     ]], book_id, days)
 
