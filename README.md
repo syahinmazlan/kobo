@@ -4,26 +4,26 @@
 
 ---
 
-## 🚀 Key Enhancements
+## Key Enhancements
 
-### 📊 Advanced Analytics
+### Advanced Analytics
 * **Daily Averages:** See your average reading time per day.
 * **Session Metrics:** Tracks average and median session lengths, plus pages per session.
 * **Efficiency Tracking:** View your reading speed in **pages per hour (pg/hr)** and progress gain in **percentage per hour (%/hr)**.
 * **Smart Totals:** Includes an "Actual Reading" metric that caps per-page time to prevent idle periods from inflating your total stats.
 
-### 📋 Improved Interface
+### Improved Interface
 * **Two-Column Layout:** A redesigned stats block under the title for faster scanning.
-* **High-Density Table:** Shows **7 rows per page** (up from the default 6).
+* **High-Density Table:** Shows **7 rows per page**
 * **Visual Cues:** If you've read today, the latest entry is automatically **bolded** for easy identification.
 
-### 🛠️ Smarter Progress Handling
-* **Flow-Aware:** Correctly calculates progress for books with "hidden flows" (common in certain formats) by deriving effective total pages.
+### Smarter Progress Handling
+* **Flow-Aware:** Correctly calculates progress for books with "hidden flows" by deriving effective total pages.
 * **Data Validation:** Filters out "junk" data—sessions are only counted if you read more than one page and spent at least 60 seconds reading.
 
 ---
 
-## 🔍 Data Reference Guide
+## Data Reference Guide
 
 ### The Stats Header
 | Category | Metric | Description |
@@ -32,7 +32,7 @@
 | | `Book total` | Raw sum of all recorded reading time. |
 | | `Actual reading` | The "true" time spent (excluding long idle gaps). |
 | **Left Col** | `Daily avg` | Average time spent reading per day. |
-| | `Avg/Med session` | The average and middle-ground length of your sessions. |
+| | `Avg/Med session` | The average and middle-ground (median) length of your sessions. |
 | **Right Col** | `pg/hr` | Your current reading speed. |
 | | `pg/session` | How many pages you typically clear in one sitting. |
 | | `%/hr` | How quickly you are moving through the book total. |
