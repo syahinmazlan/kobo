@@ -32,7 +32,10 @@ you can set goals in two ways:
 
 ### reminders
 
-when you set a goal, there's a checkbox to enable progress reminders. if you turn it on, you can choose how often you want to be reminded. for example, setting it to 25% means you'll get notified at 25%, 50%, and 75% of your way through the goal.
+you can toggle progress reminders from:
+- tools → reading goal → settings → **show progress reminder: on/off**
+
+if it's on, you'll be asked for the reminder interval when setting a goal. for example, setting it to 25% means you'll get notified at 25%, 50%, and 75% of your way through the goal.
 
 the percentage is based on your goal progress, not the whole book. so if your goal is to read from page 100 to page 200, 50% reminder fires at page 150.
 
@@ -43,16 +46,25 @@ you can set page targets per day or per week:
 - **this book only** - track how many pages you read in the current book each day/week
 - **all books** - track total pages across every book you open
 
-if you don't hit your daily target, the missed pages carry over to the next day. so if your goal is 30 pages/day and you only read 20, tomorrow you'll need to read 40.
+targets are fixed to the value you set. missed pages do **not** carry over to the next day/week.
+progress is based on forward movement from your starting page for that period, so jumping back and re-reading pages won't inflate the count.
 
 you can check your progress anytime from the "view progress" option.
 
 ### status bar
 
-the plugin can show your progress in the status bar and/or the alt status bar. toggle these from the checkboxes that appear when you set a goal.
+the plugin can show your progress in the status bar and/or the alt status bar. toggle these from:
+- tools → reading goal → settings → **display goal in status bar: on/off**
+- tools → reading goal → settings → **display goal in alt status bar: on/off**
 
-- position goals show stuff like `⚑ 15% left` or `⚑ 42 pg left`
-- daily/weekly goals show `⚑ 22/30 today` or `⚑ 150/210 wk`
+- percentage goals show one decimal place, e.g. `⚑ 14.3% left`
+- page goals show stuff like `⚑ 42 pg left`
+- daily/weekly goals show remaining/completed/over-goal status based on your current target.
+  - default format: `⚑ -8 pg left today`, `⚑ ✓ wk`, `⚑ +12 pg over today`
+  - optional compact format: `⚑ -8 today`, `⚑ ✓ wk`, `⚑ +12 today`
+
+you can switch between default and compact daily/weekly status from:
+- tools → reading goal → daily/weekly goals → **compact status display: on/off**
 
 ## compatibility
 

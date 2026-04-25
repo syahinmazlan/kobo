@@ -1,4 +1,3 @@
-local CheckButton = require("ui/widget/checkbutton")
 local ConfirmBox = require("ui/widget/confirmbox")
 local Dispatcher = require("dispatcher")
 local Event = require("ui/event")
@@ -111,15 +110,27 @@ function ReadingGoal:_statusBarText()
     if self:goalActive() then
         return self:remainingProgress()
     end
+    local compact = self.settings and self.settings.compact_daily_weekly_status
     local parts = {}
     for _, dw in ipairs(self:_getAllActiveDailyWeekly()) do
         local read = self:_getDailyWeeklyRead(dw)
-        local effective = dw.target_pages + (dw.deficit or 0)
+        local effective = dw.target_pages
         local suffix = dw.mode == "weekly" and "wk" or "today"
-        if read >= effective then
+        local delta = effective - read
+        if delta > 0 then
+            if compact then
+                table.insert(parts, string.format("-%d %s", delta, suffix))
+            else
+                table.insert(parts, string.format("-%d pg left %s", delta, suffix))
+            end
+        elseif delta == 0 then
             table.insert(parts, string.format("✓ %s", suffix))
         else
-            table.insert(parts, string.format("%d/%d %s", read, effective, suffix))
+            if compact then
+                table.insert(parts, string.format("+%d %s", math.abs(delta), suffix))
+            else
+                table.insert(parts, string.format("+%d pg over %s", math.abs(delta), suffix))
+            end
         end
     end
     if #parts > 0 then
@@ -231,6 +242,13 @@ function ReadingGoal:currentProgress()
     return (curr / total) * 100
 end
 
+function ReadingGoal:_normalizePercentage(value)
+    local n = tonumber(value)
+    if not n then return nil end
+    n = math.max(0, math.min(100, n))
+    return math.floor((n * 10) + 0.5) / 10
+end
+
 function ReadingGoal:goalActive()
     return self.goal_percentage > 0 or self.goal_page > 0 or self.goal_stable_page_idx > 0
 end
@@ -241,8 +259,8 @@ function ReadingGoal:remainingProgress()
 
     if self.goal_type == "percentage" then
         if not (curr and total and total > 0) then return _("Calculating…") end
-        local remaining = self.goal_percentage - (curr / total) * 100
-        return string.format("%.0f%% left", math.max(remaining, 0))
+        local remaining = self.goal_percentage - self:currentProgress()
+        return string.format("%.1f%% left", math.max(remaining, 0))
     elseif self.goal_type == "stable_page" then
         if not stable_idx then return _("Calculating…") end
         local remaining = self.goal_stable_page_idx - stable_idx
@@ -312,7 +330,7 @@ function ReadingGoal:_maybeFireGoal()
     local reached = false
     if self.goal_type == "percentage" then
         if curr and total and total > 0 then
-            reached = (curr / total) * 100 >= self.goal_percentage
+            reached = ((curr / total) * 100) + 1e-6 >= self.goal_percentage
         end
     elseif self.goal_type == "stable_page" then
         if stable_idx then
@@ -340,7 +358,7 @@ function ReadingGoal:checkGoal()
     local reached = false
     if self.goal_type == "percentage" then
         if curr and total and total > 0 then
-            reached = (curr / total) * 100 >= self.goal_percentage
+            reached = ((curr / total) * 100) + 1e-6 >= self.goal_percentage
         end
     elseif self.goal_type == "stable_page" then
         if stable_idx then
@@ -367,10 +385,10 @@ function ReadingGoal:setGoal(value, goal_type)
     self.reminders_fired = {}
 
     if goal_type == "percentage" then
-        self.goal_percentage = value
+        self.goal_percentage = self:_normalizePercentage(value) or 0
         self.goal_page = 0
         self.goal_stable_page_idx = 0
-        self.last_goal_percentage = value
+        self.last_goal_percentage = self.goal_percentage
         self.start_percentage = (curr and total and total > 0) and (curr / total) * 100 or 0
         self.start_page = 0
         self.start_stable_page_idx = 0
@@ -616,6 +634,24 @@ function ReadingGoal:_trackPages()
     self:_persistDailyWeeklyToDoc()
 end
 
+function ReadingGoal:_updateBookPeriodProgress(entry, curr)
+    if not entry then return end
+    local prior_read = math.max(0, entry.pages_read or 0)
+    entry.start_page = entry.start_page or (curr - prior_read)
+    entry.max_page = math.max(entry.max_page or entry.start_page or curr, curr)
+    entry.pages_read = math.max(0, entry.max_page - entry.start_page)
+end
+
+function ReadingGoal:_sumGlobalBookProgress(entry)
+    local total = 0
+    for _, state in pairs(entry.books or {}) do
+        local start_page = state.start_page or 0
+        local max_page = state.max_page or start_page
+        total = total + math.max(0, max_page - start_page)
+    end
+    entry.pages_read = total
+end
+
 function ReadingGoal:_trackBookGoal(dw, curr)
     if not dw or not dw.target_pages or dw.target_pages <= 0 then return end
 
@@ -630,21 +666,10 @@ function ReadingGoal:_trackBookGoal(dw, curr)
     end
 
     if not dw.log[key] then
-        self:_computeDeficit(dw, key)
-        dw.log[key] = { pages_read = 0 }
+        dw.log[key] = { pages_read = 0, start_page = curr, max_page = curr }
     end
 
-    local effective = dw.target_pages + (dw.deficit or 0)
-    if (dw.log[key].pages_read or 0) >= effective then
-        dw.last_known_page = curr
-        return
-    end
-
-    local last = dw.last_known_page
-    if last and curr ~= last then
-        local delta = curr - last
-        dw.log[key].pages_read = math.max(0, (dw.log[key].pages_read or 0) + delta)
-    end
+    self:_updateBookPeriodProgress(dw.log[key], curr)
     dw.last_known_page = curr
 end
 
@@ -654,7 +679,6 @@ function ReadingGoal:_trackGlobalGoal(gdw, curr, book_path)
 
     gdw.last_known_pages = gdw.last_known_pages or {}
     gdw.log = gdw.log or {}
-    local last = gdw.last_known_pages[book_path]
 
     local key
     if gdw.mode == "weekly" then
@@ -664,20 +688,26 @@ function ReadingGoal:_trackGlobalGoal(gdw, curr, book_path)
     end
 
     if not gdw.log[key] then
-        self:_computeDeficit(gdw, key)
-        gdw.log[key] = { pages_read = 0 }
+        gdw.log[key] = { pages_read = 0, books = {} }
     end
 
-    local effective = gdw.target_pages + (gdw.deficit or 0)
-    if (gdw.log[key].pages_read or 0) >= effective then
-        gdw.last_known_pages[book_path] = curr
-        return
+    local entry = gdw.log[key]
+    entry.books = entry.books or {}
+    if not entry.books[book_path] then
+        local prior_read = 0
+        if next(entry.books) == nil then
+            prior_read = math.max(0, entry.pages_read or 0)
+        end
+        entry.books[book_path] = {
+            start_page = curr - prior_read,
+            max_page = curr,
+        }
     end
 
-    if last and curr ~= last then
-        local delta = curr - last
-        gdw.log[key].pages_read = math.max(0, (gdw.log[key].pages_read or 0) + delta)
-    end
+    local state = entry.books[book_path]
+    state.start_page = state.start_page or curr
+    state.max_page = math.max(state.max_page or state.start_page, curr)
+    self:_sumGlobalBookProgress(entry)
 
     gdw.last_known_pages[book_path] = curr
     self:_pruneLogs(gdw)
@@ -686,7 +716,7 @@ end
 function ReadingGoal:_checkDailyWeeklyReached()
     for _, dw in ipairs(self:_getAllActiveDailyWeekly()) do
         local read = self:_getDailyWeeklyRead(dw)
-        local effective = dw.target_pages + (dw.deficit or 0)
+        local effective = dw.target_pages
         local key = dw.mode == "weekly" and self:_getWeekStartDate() or self:_today()
         if read >= effective and dw.reached_shown ~= key then
             dw.reached_shown = key
@@ -695,24 +725,6 @@ function ReadingGoal:_checkDailyWeeklyReached()
                 text = T(_("%1 goal reached! (%2/%3 pages)"), period_label, read, dw.target_pages),
                 timeout = 5,
             })
-        end
-    end
-end
-
-function ReadingGoal:_computeDeficit(dw, current_key)
-    dw.deficit = dw.deficit or 0
-    local prev_key, prev_data
-    for k, v in pairs(dw.log or {}) do
-        if k < current_key and (not prev_key or k > prev_key) then
-            prev_key = k
-            prev_data = v
-        end
-    end
-    if prev_data then
-        local read = prev_data.pages_read or 0
-        local shortfall = (dw.target_pages or 0) - read
-        if shortfall > 0 then
-            dw.deficit = dw.deficit + shortfall
         end
     end
 end
@@ -744,29 +756,6 @@ function ReadingGoal:onGotoPage() return self:_maybeFireGoal() end
 function ReadingGoal:onPosUpdate() return self:_maybeFireGoal() end
 function ReadingGoal:onUpdatePos() return self:_maybeFireGoal() end
 
-function ReadingGoal:addCheckboxes(widget)
-    widget:addWidget(CheckButton:new{
-        text = _("Show goal in alt status bar"),
-        checked = self.settings.show_value_in_header,
-        parent = widget,
-        callback = function()
-            self.settings.show_value_in_header = not self.settings.show_value_in_header or nil
-            if self.settings.show_value_in_header then self:addAdditionalHeaderContent()
-            else self:removeAdditionalHeaderContent() end
-        end,
-    })
-    widget:addWidget(CheckButton:new{
-        text = _("Show goal in status bar"),
-        checked = self.settings.show_value_in_footer,
-        parent = widget,
-        callback = function()
-            self.settings.show_value_in_footer = not self.settings.show_value_in_footer or nil
-            if self.settings.show_value_in_footer then self:addAdditionalFooterContent()
-            else self:removeAdditionalFooterContent() end
-        end,
-    })
-end
-
 function ReadingGoal:addToMainMenu(menu_items)
     menu_items.reading_goal = {
         sorting_hint = "tools",
@@ -776,7 +765,7 @@ function ReadingGoal:addToMainMenu(menu_items)
             {
                 text_func = function()
                     local pct = self:currentProgress()
-                    local cur = (pct and pct > 0) and string.format(" (current: %d%%)", math.floor(pct + 0.5)) or ""
+                    local cur = (pct and pct > 0) and string.format(" (current: %.1f%%)", pct) or ""
                     return _("Set percentage goal") .. cur
                 end,
                 keep_menu_open = true,
@@ -828,6 +817,48 @@ function ReadingGoal:addToMainMenu(menu_items)
                 keep_menu_open = true,
                 callback = function(tmi) self:_showRelativeGoalDialog("stable_page", tmi) end,
                 separator = true,
+            },
+            {
+                text = _("Settings"),
+                sub_item_table = {
+                    {
+                        text_func = function()
+                            local mode = self.settings.enable_progress_reminders and _("On") or _("Off")
+                            return T(_("Show progress reminder: %1"), mode)
+                        end,
+                        keep_menu_open = true,
+                        callback = function(tmi)
+                            self.settings.enable_progress_reminders = not self.settings.enable_progress_reminders or nil
+                            if tmi then tmi:updateItems() end
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            local mode = self.settings.show_value_in_footer and _("On") or _("Off")
+                            return T(_("Display goal in status bar: %1"), mode)
+                        end,
+                        keep_menu_open = true,
+                        callback = function(tmi)
+                            self.settings.show_value_in_footer = not self.settings.show_value_in_footer or nil
+                            if self.settings.show_value_in_footer then self:addAdditionalFooterContent()
+                            else self:removeAdditionalFooterContent() end
+                            if tmi then tmi:updateItems() end
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            local mode = self.settings.show_value_in_header and _("On") or _("Off")
+                            return T(_("Display goal in alt status bar: %1"), mode)
+                        end,
+                        keep_menu_open = true,
+                        callback = function(tmi)
+                            self.settings.show_value_in_header = not self.settings.show_value_in_header or nil
+                            if self.settings.show_value_in_header then self:addAdditionalHeaderContent()
+                            else self:removeAdditionalHeaderContent() end
+                            if tmi then tmi:updateItems() end
+                        end,
+                    },
+                },
             },
             {
                 text = _("Stop goal"),
@@ -904,6 +935,18 @@ function ReadingGoal:addToMainMenu(menu_items)
                         callback = function() self:_showDailyWeeklyProgress() end,
                     },
                     {
+                        text_func = function()
+                            local mode = self.settings.compact_daily_weekly_status and _("On") or _("Off")
+                            return T(_("Compact status display: %1"), mode)
+                        end,
+                        keep_menu_open = true,
+                        callback = function(tmi)
+                            self.settings.compact_daily_weekly_status = not self.settings.compact_daily_weekly_status or nil
+                            self:_refreshStatusBars()
+                            if tmi then tmi:updateItems() end
+                        end,
+                    },
+                    {
                         text = _("Stop daily/weekly goals"),
                         keep_menu_open = true,
                         enabled_func = function() return self:_dailyWeeklyActive() end,
@@ -930,7 +973,6 @@ function ReadingGoal:_showAbsoluteGoalDialog(goal_type, touchmenu_instance)
         hint = total and T(_("Enter target page (1-%1)"), total) or _("Enter target page")
     end
 
-    local reminder_enabled = false
     local dlg
     dlg = InputDialog:new{
         title = title,
@@ -950,8 +992,13 @@ function ReadingGoal:_showAbsoluteGoalDialog(goal_type, touchmenu_instance)
 
         local already_past = false
         if goal_type == "percentage" then
+            value = self:_normalizePercentage(value)
+            if not value or value <= 0 then
+                UIManager:close(dlg)
+                return
+            end
             local currPct = self:currentProgress() or 0
-            if value <= currPct then already_past = true end
+            if value <= currPct + 1e-6 then already_past = true end
         elseif goal_type == "stable_page" then
             local _c, _t, _sl, idx = self:_getPages()
             if idx and value <= idx then already_past = true end
@@ -968,24 +1015,13 @@ function ReadingGoal:_showAbsoluteGoalDialog(goal_type, touchmenu_instance)
 
         UIManager:close(dlg)
 
-        if reminder_enabled then
+        if self.settings.enable_progress_reminders then
             self:_showReminderIntervalDialog(value, goal_type, touchmenu_instance)
         else
             self:setGoal(value, goal_type)
             if touchmenu_instance then touchmenu_instance:updateItems() end
         end
     end
-
-    self:addCheckboxes(dlg)
-
-    dlg:addWidget(CheckButton:new{
-        text = _("Enable progress reminders"),
-        checked = false,
-        parent = dlg,
-        callback = function()
-            reminder_enabled = not reminder_enabled
-        end,
-    })
 
     UIManager:show(dlg)
     return true
@@ -1041,7 +1077,6 @@ function ReadingGoal:_showRelativeGoalDialog(goal_type, touchmenu_instance)
         hint = _("e.g. 100 to read 100 more pages")
     end
 
-    local reminder_enabled = false
     local dlg
     dlg = InputDialog:new{
         title = title,
@@ -1062,8 +1097,7 @@ function ReadingGoal:_showRelativeGoalDialog(goal_type, touchmenu_instance)
         local target
         if goal_type == "percentage" then
             local currPct = self:currentProgress() or 0
-            target = currPct + amount
-            if target > 100 then target = 100 end
+            target = self:_normalizePercentage(currPct + amount)
         elseif goal_type == "stable_page" then
             local _c, _t, _sl, idx = self:_getPages()
             if not idx then
@@ -1084,23 +1118,13 @@ function ReadingGoal:_showRelativeGoalDialog(goal_type, touchmenu_instance)
 
         UIManager:close(dlg)
 
-        if reminder_enabled then
+        if self.settings.enable_progress_reminders then
             self:_showReminderIntervalDialog(target, goal_type, touchmenu_instance)
         else
             self:setGoal(target, goal_type)
             if touchmenu_instance then touchmenu_instance:updateItems() end
         end
     end
-
-    self:addCheckboxes(dlg)
-    dlg:addWidget(CheckButton:new{
-        text = _("Enable progress reminders"),
-        checked = false,
-        parent = dlg,
-        callback = function()
-            reminder_enabled = not reminder_enabled
-        end,
-    })
 
     UIManager:show(dlg)
     return true
@@ -1187,9 +1211,8 @@ function ReadingGoal:_showSetDailyWeeklyDialog(scope, period, touchmenu_instance
                 mode = period,
                 target_pages = target,
                 start_date = self:_today(),
-                deficit = 0,
                 last_known_page = curr or 0,
-                log = { [key] = { pages_read = 0 } },
+                log = { [key] = { pages_read = 0, start_page = curr or 0, max_page = curr or 0 } },
             }
             if period == "weekly" then
                 self.book_weekly = new_dw
@@ -1204,12 +1227,15 @@ function ReadingGoal:_showSetDailyWeeklyDialog(scope, period, touchmenu_instance
             local new_gdw = {
                 mode = period,
                 target_pages = target,
-                deficit = 0,
-                log = { [key] = { pages_read = 0 } },
+                log = { [key] = { pages_read = 0, books = {} } },
                 last_known_pages = {},
             }
             if book_path and curr then
                 new_gdw.last_known_pages[book_path] = curr
+                new_gdw.log[key].books[book_path] = {
+                    start_page = curr,
+                    max_page = curr,
+                }
             end
             if period == "weekly" then
                 self.settings.global_weekly = new_gdw
@@ -1234,20 +1260,14 @@ end
 function ReadingGoal:_appendProgressLines(lines, dw, header)
     if not dw or not dw.target_pages or dw.target_pages <= 0 then return end
     local read = self:_getDailyWeeklyRead(dw)
-    local deficit = dw.deficit or 0
-    local effective = dw.target_pages + deficit
+    local effective = dw.target_pages
     local remaining = math.max(0, effective - read)
     local period_label = dw.mode == "weekly" and _("Weekly") or _("Daily")
 
     table.insert(lines, header)
     table.insert(lines, T(_("%1 goal: %2 pages"), period_label, dw.target_pages))
     table.insert(lines, T(_("Read: %1/%2 pages"), read, dw.target_pages))
-    if deficit > 0 then
-        table.insert(lines, T(_("Deficit: +%1 pages"), deficit))
-        table.insert(lines, T(_("Effective target: %1 pages (%2 remaining)"), effective, remaining))
-    else
-        table.insert(lines, T(_("Remaining: %1 pages"), remaining))
-    end
+    table.insert(lines, T(_("Remaining: %1 pages"), remaining))
     table.insert(lines, "")
 end
 
