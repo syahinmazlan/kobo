@@ -53,7 +53,7 @@ the plugin can show your progress in the status bar and/or the alt status bar. t
 
 - position goals show stuff like `⚑ 15% left` or `⚑ 42 pg left`
 - daily/weekly goals show remaining/completed/over-goal status based on your current target.
-  - default format: `⚑ 8 pg left today`, `⚑ ✓ wk`, `⚑ 12 pg over today`
+  - default format: `⚑ -8 pg left today`, `⚑ ✓ wk`, `⚑ +12 pg over today`
   - optional compact format: `⚑ -8 today`, `⚑ ✓ wk`, `⚑ +12 today`
 
 you can switch between default and compact daily/weekly status from:

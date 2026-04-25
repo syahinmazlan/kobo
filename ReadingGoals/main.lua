@@ -122,7 +122,7 @@ function ReadingGoal:_statusBarText()
             if compact then
                 table.insert(parts, string.format("-%d %s", delta, suffix))
             else
-                table.insert(parts, string.format("%d pg left %s", delta, suffix))
+                table.insert(parts, string.format("-%d pg left %s", delta, suffix))
             end
         elseif delta == 0 then
             table.insert(parts, string.format("✓ %s", suffix))
@@ -130,7 +130,7 @@ function ReadingGoal:_statusBarText()
             if compact then
                 table.insert(parts, string.format("+%d %s", math.abs(delta), suffix))
             else
-                table.insert(parts, string.format("%d pg over %s", math.abs(delta), suffix))
+                table.insert(parts, string.format("+%d pg over %s", math.abs(delta), suffix))
             end
         end
     end
