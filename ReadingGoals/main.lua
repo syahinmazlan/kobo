@@ -209,6 +209,30 @@ function ReadingGoal:_hasStablePages()
         and self.ui.pagemap:wantsPageLabels()
 end
 
+function ReadingGoal:_getEffectivePercentagePages()
+    local curr, total = self:_getPages()
+    if not (curr and total and total > 0) then return curr, total end
+    if not (self.ui and self.ui.document) then return curr, total end
+    local doc = self.ui.document
+
+    if doc.hasHiddenFlows and doc:hasHiddenFlows()
+        and self.ui.getCurrentPage and doc.getPageFlow and doc.getTotalPagesInFlow then
+        local ok_page, current_page = pcall(function() return self.ui:getCurrentPage() end)
+        if ok_page and type(current_page) == "number" and current_page > 0 then
+            local ok_flow, flow = pcall(function() return doc:getPageFlow(current_page) end)
+            if ok_flow and flow then
+                local ok_total, flow_total = pcall(function() return doc:getTotalPagesInFlow(flow) end)
+                if ok_total and type(flow_total) == "number" and flow_total > 0 then
+                    curr = math.min(current_page, flow_total)
+                    total = flow_total
+                end
+            end
+        end
+    end
+
+    return curr, total
+end
+
 function ReadingGoal:_getPages()
     if not self.ui then return nil, nil, nil, nil, nil end
     local curr, total
@@ -237,9 +261,16 @@ function ReadingGoal:_getPages()
 end
 
 function ReadingGoal:currentProgress()
-    local curr, total = self:_getPages()
+    local curr, total = self:_getEffectivePercentagePages()
     if not curr or not total or total == 0 then return 0 end
     return (curr / total) * 100
+end
+
+function ReadingGoal:_normalizePercentage(value)
+    local n = tonumber(value)
+    if not n then return nil end
+    n = math.max(0, math.min(100, n))
+    return math.floor((n * 10) + 0.5) / 10
 end
 
 function ReadingGoal:goalActive()
@@ -252,7 +283,7 @@ function ReadingGoal:remainingProgress()
 
     if self.goal_type == "percentage" then
         if not (curr and total and total > 0) then return _("Calculating…") end
-        local remaining = self.goal_percentage - (curr / total) * 100
+        local remaining = self.goal_percentage - self:currentProgress()
         return string.format("%.1f%% left", math.max(remaining, 0))
     elseif self.goal_type == "stable_page" then
         if not stable_idx then return _("Calculating…") end
@@ -268,8 +299,8 @@ end
 function ReadingGoal:_computeGoalProgress()
     local curr, total, _sl, stable_idx, _sc = self:_getPages()
     if self.goal_type == "percentage" then
-        if not (curr and total and total > 0) then return 0 end
-        local curr_pct = (curr / total) * 100
+        local curr_pct = self:currentProgress()
+        if not curr_pct then return 0 end
         local span = self.goal_percentage - self.start_percentage
         if span <= 0 then return 100 end
         return math.min(100, ((curr_pct - self.start_percentage) / span) * 100)
@@ -322,9 +353,7 @@ function ReadingGoal:_maybeFireGoal()
 
     local reached = false
     if self.goal_type == "percentage" then
-        if curr and total and total > 0 then
-            reached = (curr / total) * 100 >= self.goal_percentage
-        end
+        reached = self:currentProgress() + 1e-6 >= self.goal_percentage
     elseif self.goal_type == "stable_page" then
         if stable_idx then
             reached = stable_idx >= self.goal_stable_page_idx
@@ -350,9 +379,7 @@ function ReadingGoal:checkGoal()
 
     local reached = false
     if self.goal_type == "percentage" then
-        if curr and total and total > 0 then
-            reached = (curr / total) * 100 >= self.goal_percentage
-        end
+        reached = self:currentProgress() + 1e-6 >= self.goal_percentage
     elseif self.goal_type == "stable_page" then
         if stable_idx then
             reached = stable_idx >= self.goal_stable_page_idx
@@ -378,11 +405,11 @@ function ReadingGoal:setGoal(value, goal_type)
     self.reminders_fired = {}
 
     if goal_type == "percentage" then
-        self.goal_percentage = math.floor((value * 10) + 0.5) / 10
+        self.goal_percentage = self:_normalizePercentage(value) or 0
         self.goal_page = 0
         self.goal_stable_page_idx = 0
         self.last_goal_percentage = self.goal_percentage
-        self.start_percentage = (curr and total and total > 0) and (curr / total) * 100 or 0
+        self.start_percentage = self:currentProgress() or 0
         self.start_page = 0
         self.start_stable_page_idx = 0
     elseif goal_type == "stable_page" then
@@ -985,8 +1012,13 @@ function ReadingGoal:_showAbsoluteGoalDialog(goal_type, touchmenu_instance)
 
         local already_past = false
         if goal_type == "percentage" then
+            value = self:_normalizePercentage(value)
+            if not value or value <= 0 then
+                UIManager:close(dlg)
+                return
+            end
             local currPct = self:currentProgress() or 0
-            if value <= currPct then already_past = true end
+            if value <= currPct + 1e-6 then already_past = true end
         elseif goal_type == "stable_page" then
             local _c, _t, _sl, idx = self:_getPages()
             if idx and value <= idx then already_past = true end
@@ -1085,8 +1117,7 @@ function ReadingGoal:_showRelativeGoalDialog(goal_type, touchmenu_instance)
         local target
         if goal_type == "percentage" then
             local currPct = self:currentProgress() or 0
-            target = currPct + amount
-            if target > 100 then target = 100 end
+            target = self:_normalizePercentage(currPct + amount)
         elseif goal_type == "stable_page" then
             local _c, _t, _sl, idx = self:_getPages()
             if not idx then
