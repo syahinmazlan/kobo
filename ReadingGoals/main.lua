@@ -1,4 +1,3 @@
-local CheckButton = require("ui/widget/checkbutton")
 local ConfirmBox = require("ui/widget/confirmbox")
 local Dispatcher = require("dispatcher")
 local Event = require("ui/event")
@@ -254,7 +253,7 @@ function ReadingGoal:remainingProgress()
     if self.goal_type == "percentage" then
         if not (curr and total and total > 0) then return _("Calculating…") end
         local remaining = self.goal_percentage - (curr / total) * 100
-        return string.format("%.0f%% left", math.max(remaining, 0))
+        return string.format("%.1f%% left", math.max(remaining, 0))
     elseif self.goal_type == "stable_page" then
         if not stable_idx then return _("Calculating…") end
         local remaining = self.goal_stable_page_idx - stable_idx
@@ -379,10 +378,10 @@ function ReadingGoal:setGoal(value, goal_type)
     self.reminders_fired = {}
 
     if goal_type == "percentage" then
-        self.goal_percentage = value
+        self.goal_percentage = math.floor((value * 10) + 0.5) / 10
         self.goal_page = 0
         self.goal_stable_page_idx = 0
-        self.last_goal_percentage = value
+        self.last_goal_percentage = self.goal_percentage
         self.start_percentage = (curr and total and total > 0) and (curr / total) * 100 or 0
         self.start_page = 0
         self.start_stable_page_idx = 0
@@ -750,29 +749,6 @@ function ReadingGoal:onGotoPage() return self:_maybeFireGoal() end
 function ReadingGoal:onPosUpdate() return self:_maybeFireGoal() end
 function ReadingGoal:onUpdatePos() return self:_maybeFireGoal() end
 
-function ReadingGoal:addCheckboxes(widget)
-    widget:addWidget(CheckButton:new{
-        text = _("Show goal in alt status bar"),
-        checked = self.settings.show_value_in_header,
-        parent = widget,
-        callback = function()
-            self.settings.show_value_in_header = not self.settings.show_value_in_header or nil
-            if self.settings.show_value_in_header then self:addAdditionalHeaderContent()
-            else self:removeAdditionalHeaderContent() end
-        end,
-    })
-    widget:addWidget(CheckButton:new{
-        text = _("Show goal in status bar"),
-        checked = self.settings.show_value_in_footer,
-        parent = widget,
-        callback = function()
-            self.settings.show_value_in_footer = not self.settings.show_value_in_footer or nil
-            if self.settings.show_value_in_footer then self:addAdditionalFooterContent()
-            else self:removeAdditionalFooterContent() end
-        end,
-    })
-end
-
 function ReadingGoal:addToMainMenu(menu_items)
     menu_items.reading_goal = {
         sorting_hint = "tools",
@@ -782,7 +758,7 @@ function ReadingGoal:addToMainMenu(menu_items)
             {
                 text_func = function()
                     local pct = self:currentProgress()
-                    local cur = (pct and pct > 0) and string.format(" (current: %d%%)", math.floor(pct + 0.5)) or ""
+                    local cur = (pct and pct > 0) and string.format(" (current: %.1f%%)", pct) or ""
                     return _("Set percentage goal") .. cur
                 end,
                 keep_menu_open = true,
@@ -834,6 +810,48 @@ function ReadingGoal:addToMainMenu(menu_items)
                 keep_menu_open = true,
                 callback = function(tmi) self:_showRelativeGoalDialog("stable_page", tmi) end,
                 separator = true,
+            },
+            {
+                text = _("Settings"),
+                sub_item_table = {
+                    {
+                        text_func = function()
+                            local mode = self.settings.enable_progress_reminders and _("On") or _("Off")
+                            return T(_("Show progress reminder: %1"), mode)
+                        end,
+                        keep_menu_open = true,
+                        callback = function(tmi)
+                            self.settings.enable_progress_reminders = not self.settings.enable_progress_reminders or nil
+                            if tmi then tmi:updateItems() end
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            local mode = self.settings.show_value_in_footer and _("On") or _("Off")
+                            return T(_("Display goal in status bar: %1"), mode)
+                        end,
+                        keep_menu_open = true,
+                        callback = function(tmi)
+                            self.settings.show_value_in_footer = not self.settings.show_value_in_footer or nil
+                            if self.settings.show_value_in_footer then self:addAdditionalFooterContent()
+                            else self:removeAdditionalFooterContent() end
+                            if tmi then tmi:updateItems() end
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            local mode = self.settings.show_value_in_header and _("On") or _("Off")
+                            return T(_("Display goal in alt status bar: %1"), mode)
+                        end,
+                        keep_menu_open = true,
+                        callback = function(tmi)
+                            self.settings.show_value_in_header = not self.settings.show_value_in_header or nil
+                            if self.settings.show_value_in_header then self:addAdditionalHeaderContent()
+                            else self:removeAdditionalHeaderContent() end
+                            if tmi then tmi:updateItems() end
+                        end,
+                    },
+                },
             },
             {
                 text = _("Stop goal"),
@@ -948,7 +966,6 @@ function ReadingGoal:_showAbsoluteGoalDialog(goal_type, touchmenu_instance)
         hint = total and T(_("Enter target page (1-%1)"), total) or _("Enter target page")
     end
 
-    local reminder_enabled = false
     local dlg
     dlg = InputDialog:new{
         title = title,
@@ -986,24 +1003,13 @@ function ReadingGoal:_showAbsoluteGoalDialog(goal_type, touchmenu_instance)
 
         UIManager:close(dlg)
 
-        if reminder_enabled then
+        if self.settings.enable_progress_reminders then
             self:_showReminderIntervalDialog(value, goal_type, touchmenu_instance)
         else
             self:setGoal(value, goal_type)
             if touchmenu_instance then touchmenu_instance:updateItems() end
         end
     end
-
-    self:addCheckboxes(dlg)
-
-    dlg:addWidget(CheckButton:new{
-        text = _("Enable progress reminders"),
-        checked = false,
-        parent = dlg,
-        callback = function()
-            reminder_enabled = not reminder_enabled
-        end,
-    })
 
     UIManager:show(dlg)
     return true
@@ -1059,7 +1065,6 @@ function ReadingGoal:_showRelativeGoalDialog(goal_type, touchmenu_instance)
         hint = _("e.g. 100 to read 100 more pages")
     end
 
-    local reminder_enabled = false
     local dlg
     dlg = InputDialog:new{
         title = title,
@@ -1102,23 +1107,13 @@ function ReadingGoal:_showRelativeGoalDialog(goal_type, touchmenu_instance)
 
         UIManager:close(dlg)
 
-        if reminder_enabled then
+        if self.settings.enable_progress_reminders then
             self:_showReminderIntervalDialog(target, goal_type, touchmenu_instance)
         else
             self:setGoal(target, goal_type)
             if touchmenu_instance then touchmenu_instance:updateItems() end
         end
     end
-
-    self:addCheckboxes(dlg)
-    dlg:addWidget(CheckButton:new{
-        text = _("Enable progress reminders"),
-        checked = false,
-        parent = dlg,
-        callback = function()
-            reminder_enabled = not reminder_enabled
-        end,
-    })
 
     UIManager:show(dlg)
     return true

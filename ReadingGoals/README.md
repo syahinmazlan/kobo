@@ -32,7 +32,10 @@ you can set goals in two ways:
 
 ### reminders
 
-when you set a goal, there's a checkbox to enable progress reminders. if you turn it on, you can choose how often you want to be reminded. for example, setting it to 25% means you'll get notified at 25%, 50%, and 75% of your way through the goal.
+you can toggle progress reminders from:
+- tools → reading goal → settings → **show progress reminder: on/off**
+
+if it's on, you'll be asked for the reminder interval when setting a goal. for example, setting it to 25% means you'll get notified at 25%, 50%, and 75% of your way through the goal.
 
 the percentage is based on your goal progress, not the whole book. so if your goal is to read from page 100 to page 200, 50% reminder fires at page 150.
 
@@ -50,9 +53,12 @@ you can check your progress anytime from the "view progress" option.
 
 ### status bar
 
-the plugin can show your progress in the status bar and/or the alt status bar. toggle these from the checkboxes that appear when you set a goal.
+the plugin can show your progress in the status bar and/or the alt status bar. toggle these from:
+- tools → reading goal → settings → **display goal in status bar: on/off**
+- tools → reading goal → settings → **display goal in alt status bar: on/off**
 
-- position goals show stuff like `⚑ 15% left` or `⚑ 42 pg left`
+- percentage goals show one decimal place, e.g. `⚑ 14.3% left`
+- page goals show stuff like `⚑ 42 pg left`
 - daily/weekly goals show remaining/completed/over-goal status based on your current target.
   - default format: `⚑ -8 pg left today`, `⚑ ✓ wk`, `⚑ +12 pg over today`
   - optional compact format: `⚑ -8 today`, `⚑ ✓ wk`, `⚑ +12 today`
