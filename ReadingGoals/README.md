@@ -43,7 +43,7 @@ you can set page targets per day or per week:
 - **this book only** - track how many pages you read in the current book each day/week
 - **all books** - track total pages across every book you open
 
-if you don't hit your daily target, the missed pages carry over to the next day. so if your goal is 30 pages/day and you only read 20, tomorrow you'll need to read 40.
+targets are fixed to the value you set. missed pages do **not** carry over to the next day/week.
 
 you can check your progress anytime from the "view progress" option.
 
@@ -52,7 +52,12 @@ you can check your progress anytime from the "view progress" option.
 the plugin can show your progress in the status bar and/or the alt status bar. toggle these from the checkboxes that appear when you set a goal.
 
 - position goals show stuff like `⚑ 15% left` or `⚑ 42 pg left`
-- daily/weekly goals show `⚑ 22/30 today` or `⚑ 150/210 wk`
+- daily/weekly goals show remaining/completed/over-goal status based on your current target.
+  - default format: `⚑ -8 pg left today`, `⚑ ✓ wk`, `⚑ +12 pg over today`
+  - optional compact format: `⚑ -8 today`, `⚑ ✓ wk`, `⚑ +12 today`
+
+you can switch between default and compact daily/weekly status from:
+- tools → reading goal → daily/weekly goals → **compact status display: on/off**
 
 ## compatibility
 

@@ -111,15 +111,27 @@ function ReadingGoal:_statusBarText()
     if self:goalActive() then
         return self:remainingProgress()
     end
+    local compact = self.settings and self.settings.compact_daily_weekly_status
     local parts = {}
     for _, dw in ipairs(self:_getAllActiveDailyWeekly()) do
         local read = self:_getDailyWeeklyRead(dw)
-        local effective = dw.target_pages + (dw.deficit or 0)
+        local effective = dw.target_pages
         local suffix = dw.mode == "weekly" and "wk" or "today"
-        if read >= effective then
+        local delta = effective - read
+        if delta > 0 then
+            if compact then
+                table.insert(parts, string.format("-%d %s", delta, suffix))
+            else
+                table.insert(parts, string.format("-%d pg left %s", delta, suffix))
+            end
+        elseif delta == 0 then
             table.insert(parts, string.format("✓ %s", suffix))
         else
-            table.insert(parts, string.format("%d/%d %s", read, effective, suffix))
+            if compact then
+                table.insert(parts, string.format("+%d %s", math.abs(delta), suffix))
+            else
+                table.insert(parts, string.format("+%d pg over %s", math.abs(delta), suffix))
+            end
         end
     end
     if #parts > 0 then
@@ -630,14 +642,7 @@ function ReadingGoal:_trackBookGoal(dw, curr)
     end
 
     if not dw.log[key] then
-        self:_computeDeficit(dw, key)
         dw.log[key] = { pages_read = 0 }
-    end
-
-    local effective = dw.target_pages + (dw.deficit or 0)
-    if (dw.log[key].pages_read or 0) >= effective then
-        dw.last_known_page = curr
-        return
     end
 
     local last = dw.last_known_page
@@ -664,14 +669,7 @@ function ReadingGoal:_trackGlobalGoal(gdw, curr, book_path)
     end
 
     if not gdw.log[key] then
-        self:_computeDeficit(gdw, key)
         gdw.log[key] = { pages_read = 0 }
-    end
-
-    local effective = gdw.target_pages + (gdw.deficit or 0)
-    if (gdw.log[key].pages_read or 0) >= effective then
-        gdw.last_known_pages[book_path] = curr
-        return
     end
 
     if last and curr ~= last then
@@ -686,7 +684,7 @@ end
 function ReadingGoal:_checkDailyWeeklyReached()
     for _, dw in ipairs(self:_getAllActiveDailyWeekly()) do
         local read = self:_getDailyWeeklyRead(dw)
-        local effective = dw.target_pages + (dw.deficit or 0)
+        local effective = dw.target_pages
         local key = dw.mode == "weekly" and self:_getWeekStartDate() or self:_today()
         if read >= effective and dw.reached_shown ~= key then
             dw.reached_shown = key
@@ -695,24 +693,6 @@ function ReadingGoal:_checkDailyWeeklyReached()
                 text = T(_("%1 goal reached! (%2/%3 pages)"), period_label, read, dw.target_pages),
                 timeout = 5,
             })
-        end
-    end
-end
-
-function ReadingGoal:_computeDeficit(dw, current_key)
-    dw.deficit = dw.deficit or 0
-    local prev_key, prev_data
-    for k, v in pairs(dw.log or {}) do
-        if k < current_key and (not prev_key or k > prev_key) then
-            prev_key = k
-            prev_data = v
-        end
-    end
-    if prev_data then
-        local read = prev_data.pages_read or 0
-        local shortfall = (dw.target_pages or 0) - read
-        if shortfall > 0 then
-            dw.deficit = dw.deficit + shortfall
         end
     end
 end
@@ -902,6 +882,18 @@ function ReadingGoal:addToMainMenu(menu_items)
                         text = _("View progress"),
                         keep_menu_open = true,
                         callback = function() self:_showDailyWeeklyProgress() end,
+                    },
+                    {
+                        text_func = function()
+                            local mode = self.settings.compact_daily_weekly_status and _("On") or _("Off")
+                            return T(_("Compact status display: %1"), mode)
+                        end,
+                        keep_menu_open = true,
+                        callback = function(tmi)
+                            self.settings.compact_daily_weekly_status = not self.settings.compact_daily_weekly_status or nil
+                            self:_refreshStatusBars()
+                            if tmi then tmi:updateItems() end
+                        end,
                     },
                     {
                         text = _("Stop daily/weekly goals"),
@@ -1187,7 +1179,6 @@ function ReadingGoal:_showSetDailyWeeklyDialog(scope, period, touchmenu_instance
                 mode = period,
                 target_pages = target,
                 start_date = self:_today(),
-                deficit = 0,
                 last_known_page = curr or 0,
                 log = { [key] = { pages_read = 0 } },
             }
@@ -1204,7 +1195,6 @@ function ReadingGoal:_showSetDailyWeeklyDialog(scope, period, touchmenu_instance
             local new_gdw = {
                 mode = period,
                 target_pages = target,
-                deficit = 0,
                 log = { [key] = { pages_read = 0 } },
                 last_known_pages = {},
             }
@@ -1234,20 +1224,14 @@ end
 function ReadingGoal:_appendProgressLines(lines, dw, header)
     if not dw or not dw.target_pages or dw.target_pages <= 0 then return end
     local read = self:_getDailyWeeklyRead(dw)
-    local deficit = dw.deficit or 0
-    local effective = dw.target_pages + deficit
+    local effective = dw.target_pages
     local remaining = math.max(0, effective - read)
     local period_label = dw.mode == "weekly" and _("Weekly") or _("Daily")
 
     table.insert(lines, header)
     table.insert(lines, T(_("%1 goal: %2 pages"), period_label, dw.target_pages))
     table.insert(lines, T(_("Read: %1/%2 pages"), read, dw.target_pages))
-    if deficit > 0 then
-        table.insert(lines, T(_("Deficit: +%1 pages"), deficit))
-        table.insert(lines, T(_("Effective target: %1 pages (%2 remaining)"), effective, remaining))
-    else
-        table.insert(lines, T(_("Remaining: %1 pages"), remaining))
-    end
+    table.insert(lines, T(_("Remaining: %1 pages"), remaining))
     table.insert(lines, "")
 end
 
