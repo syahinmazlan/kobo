@@ -132,7 +132,7 @@ function ReadingGoal:_statusBarText()
                     table.insert(parts, string.format("-%dpg", compact_value))
                 end
             else
-                table.insert(parts, string.format("-%d pg left %s", delta, suffix))
+                table.insert(parts, string.format("-%s%s left %s", verbose_amount, verbose_unit, suffix))
             end
         elseif delta == 0 then
             table.insert(parts, string.format("✓ %s", suffix))
@@ -144,7 +144,7 @@ function ReadingGoal:_statusBarText()
                     table.insert(parts, string.format("+%dpg", compact_value))
                 end
             else
-                table.insert(parts, string.format("+%d pg over %s", math.abs(delta), suffix))
+                table.insert(parts, string.format("+%s%s over %s", verbose_amount, verbose_unit, suffix))
             end
         end
     end
@@ -235,9 +235,33 @@ function ReadingGoal:_getPages()
         local ok, v = pcall(function() return self.ui.document:getCurrentPage() end)
         if ok and type(v) == "number" and v > 0 then curr = v end
     end
-    if self.ui.document and self.ui.document.getPageCount then
-        local ok, v = pcall(function() return self.ui.document:getPageCount() end)
-        if ok and type(v) == "number" and v > 0 then total = v end
+    local doc = self.ui and self.ui.document
+    if doc then
+        local flow_total
+        local has_hidden_flows = false
+        if doc.hasHiddenFlows then
+            local ok_hidden, v_hidden = pcall(function() return doc:hasHiddenFlows() end)
+            has_hidden_flows = ok_hidden and v_hidden
+        end
+        if has_hidden_flows and self.ui.getCurrentPage and doc.getPageFlow and doc.getTotalPagesInFlow then
+            local ok_curr, current_page = pcall(function() return self.ui:getCurrentPage() end)
+            if ok_curr and type(current_page) == "number" and current_page > 0 then
+                local ok_flow, flow = pcall(function() return doc:getPageFlow(current_page) end)
+                if ok_flow and flow then
+                    local ok_total, v = pcall(function() return doc:getTotalPagesInFlow(flow) end)
+                    if ok_total and type(v) == "number" and v > 0 then
+                        flow_total = v
+                    end
+                end
+            end
+        end
+
+        if flow_total and flow_total > 0 then
+            total = flow_total
+        elseif doc.getPageCount then
+            local ok, v = pcall(function() return doc:getPageCount() end)
+            if ok and type(v) == "number" and v > 0 then total = v end
+        end
     end
     local stable_label, stable_idx, stable_count
     if self:_hasStablePages() then
@@ -264,19 +288,29 @@ end
 function ReadingGoal:remainingProgress()
     if not self:goalActive() then return "" end
     local curr, total, _sl, stable_idx, _sc = self:_getPages()
+    local compact = self.settings and self.settings.compact_daily_weekly_status
 
     if self.goal_type == "percentage" then
         if not (curr and total and total > 0) then return _("Calculating…") end
-        local remaining = self.goal_percentage - (curr / total) * 100
-        return string.format("%.1f%% left", math.max(remaining, 0))
+        local remaining = math.max(self.goal_percentage - (curr / total) * 100, 0)
+        if compact then
+            return string.format("-%.1f%%", remaining)
+        end
+        return string.format("%.1f%% left", remaining)
     elseif self.goal_type == "stable_page" then
         if not stable_idx then return _("Calculating…") end
-        local remaining = self.goal_stable_page_idx - stable_idx
-        return string.format("%d sp left", math.max(remaining, 0))
+        local remaining = math.max(self.goal_stable_page_idx - stable_idx, 0)
+        if compact then
+            return string.format("-%d sp", remaining)
+        end
+        return string.format("%d sp left", remaining)
     else
         if not curr then return _("Calculating…") end
-        local remaining = self.goal_page - curr
-        return string.format("%d pg left", math.max(remaining, 0))
+        local remaining = math.max(self.goal_page - curr, 0)
+        if compact then
+            return string.format("-%d pg", remaining)
+        end
+        return string.format("%d pg left", remaining)
     end
 end
 
@@ -827,6 +861,21 @@ function ReadingGoal:addToMainMenu(menu_items)
                 separator = true,
             },
             {
+                text = _("Book goal"),
+                sub_item_table = {
+                    {
+                        text = _("Set daily pages by completion timeframe"),
+                        keep_menu_open = true,
+                        callback = function(tmi) self:_showBookCompletionGoalDialog("page", tmi) end,
+                    },
+                    {
+                        text = _("Set daily completion % by timeframe"),
+                        keep_menu_open = true,
+                        callback = function(tmi) self:_showBookCompletionGoalDialog("percentage", tmi) end,
+                    },
+                },
+            },
+            {
                 text = _("Settings"),
                 sub_item_table = {
                     {
@@ -863,6 +912,18 @@ function ReadingGoal:addToMainMenu(menu_items)
                             self.settings.show_value_in_header = not self.settings.show_value_in_header or nil
                             if self.settings.show_value_in_header then self:addAdditionalHeaderContent()
                             else self:removeAdditionalHeaderContent() end
+                            if tmi then tmi:updateItems() end
+                        end,
+                    },
+                    {
+                        text_func = function()
+                            local mode = self.settings.compact_daily_weekly_status and _("On") or _("Off")
+                            return T(_("Compact status display: %1"), mode)
+                        end,
+                        keep_menu_open = true,
+                        callback = function(tmi)
+                            self.settings.compact_daily_weekly_status = not self.settings.compact_daily_weekly_status or nil
+                            self:_refreshStatusBars()
                             if tmi then tmi:updateItems() end
                         end,
                     },
@@ -941,18 +1002,6 @@ function ReadingGoal:addToMainMenu(menu_items)
                         text = _("View progress"),
                         keep_menu_open = true,
                         callback = function() self:_showDailyWeeklyProgress() end,
-                    },
-                    {
-                        text_func = function()
-                            local mode = self.settings.compact_daily_weekly_status and _("On") or _("Off")
-                            return T(_("Compact status display: %1"), mode)
-                        end,
-                        keep_menu_open = true,
-                        callback = function(tmi)
-                            self.settings.compact_daily_weekly_status = not self.settings.compact_daily_weekly_status or nil
-                            self:_refreshStatusBars()
-                            if tmi then tmi:updateItems() end
-                        end,
                     },
                     {
                         text = _("Stop daily/weekly goals"),
@@ -1255,6 +1304,72 @@ function ReadingGoal:_showSetDailyWeeklyDialog(scope, period, touchmenu_instance
             text = T(_("Goal set: %1 pages per %2"), target, period_label),
             timeout = 5,
         })
+        if touchmenu_instance then touchmenu_instance:updateItems() end
+    end
+
+    UIManager:show(dlg)
+end
+
+function ReadingGoal:_showBookCompletionGoalDialog(goal_mode, touchmenu_instance)
+    local total = select(2, self:_getPages())
+    if not total or total <= 0 then
+        UIManager:show(InfoMessage:new{ text = _("Cannot determine total effective pages for this book") })
+        return
+    end
+
+    local title = goal_mode == "percentage"
+        and _("Set daily completion % by timeframe")
+        or _("Set daily pages by completion timeframe")
+
+    local dlg
+    dlg = InputDialog:new{
+        title = title,
+        input = "",
+        input_hint = _("Completion timeframe in days: (1-99)"),
+        input_type = "number",
+        buttons = { { { text = _("Cancel") }, { text = _("Set") } } },
+    }
+
+    dlg.buttons[1][1].callback = function() UIManager:close(dlg) end
+    dlg.buttons[1][2].callback = function()
+        local days = tonumber(dlg:getInputText())
+        UIManager:close(dlg)
+        if not days or days < 1 or days > 99 then
+            UIManager:show(InfoMessage:new{ text = _("Please enter a number between 1 and 99") })
+            return
+        end
+
+        local curr = self:_getPages()
+        local key = self:_today()
+        local target_pages
+        local info_text
+        if goal_mode == "percentage" then
+            local daily_pct = math.floor(((100 / days) * 10) + 0.5) / 10
+            target_pages = math.max(1, math.ceil((total * daily_pct) / 100))
+            info_text = T(_("Goal set: %1%% daily (~%2 pages/day, %3 days to finish)"), daily_pct, target_pages, days)
+        else
+            target_pages = math.max(1, math.ceil(total / days))
+            info_text = T(_("Goal set: %1 pages per day (%2 pages / %3 days)"), target_pages, total, days)
+        end
+
+        self.book_daily = {
+            mode = "daily",
+            target_pages = target_pages,
+            start_date = self:_today(),
+            last_known_page = curr or 0,
+            goal_mode = goal_mode,
+            completion_days = days,
+            total_effective_pages = total,
+            log = { [key] = { pages_read = 0, start_page = curr or 0, max_page = curr or 0 } },
+        }
+        self:_persistDailyWeeklyToDoc()
+        self:_ensureFooterEnabled()
+        self:update_status_bars()
+        UIManager:show(InfoMessage:new{
+            text = info_text,
+            timeout = 5,
+        })
+
         if touchmenu_instance then touchmenu_instance:updateItems() end
     end
 
