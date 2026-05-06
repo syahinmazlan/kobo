@@ -861,6 +861,21 @@ function ReadingGoal:addToMainMenu(menu_items)
                 separator = true,
             },
             {
+                text = _("Book goal"),
+                sub_item_table = {
+                    {
+                        text = _("Set daily pages by completion timeframe"),
+                        keep_menu_open = true,
+                        callback = function(tmi) self:_showBookCompletionGoalDialog("page", tmi) end,
+                    },
+                    {
+                        text = _("Set daily completion % by timeframe"),
+                        keep_menu_open = true,
+                        callback = function(tmi) self:_showBookCompletionGoalDialog("percentage", tmi) end,
+                    },
+                },
+            },
+            {
                 text = _("Settings"),
                 sub_item_table = {
                     {
