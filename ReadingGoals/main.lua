@@ -115,34 +115,37 @@ function ReadingGoal:_statusBarText()
     for _, dw in ipairs(self:_getAllActiveDailyWeekly()) do
         local read = self:_getDailyWeeklyRead(dw)
         local effective = dw.target_pages
-        local suffix = dw.mode == "weekly" and "wk" or "today"
         local delta = effective - read
-        local use_pct = dw.goal_mode == "percentage"
-            and dw.total_effective_pages and dw.total_effective_pages > 0
+        local use_pct = dw.total_effective_pages and dw.total_effective_pages > 0
             and dw.mode == "daily"
-        local verbose_amount = tostring(math.abs(delta))
-        local verbose_unit = "pg"
-        local compact_amount = tostring(math.abs(delta))
+        local pg_amount = tostring(math.abs(delta)) .. "pg"
+        local pct_amount
         if use_pct then
             local delta_pct = (100 * math.abs(delta)) / dw.total_effective_pages
-            verbose_amount = string.format("%.1f", delta_pct)
-            verbose_unit = "%"
-            compact_amount = string.format("%.1f%%", delta_pct)
+            pct_amount = string.format("%.1f%%", delta_pct)
         end
 
         if delta > 0 then
             if compact then
-                table.insert(parts, string.format("-%s %s", compact_amount, suffix))
+                table.insert(parts, string.format("-%s", pg_amount))
             else
-                table.insert(parts, string.format("-%s%s left %s", verbose_amount, verbose_unit, suffix))
+                if pct_amount then
+                    table.insert(parts, string.format("%s/%s left", pg_amount, pct_amount))
+                else
+                    table.insert(parts, string.format("%s left", pg_amount))
+                end
             end
         elseif delta == 0 then
-            table.insert(parts, string.format("✓ %s", suffix))
+            table.insert(parts, "✓")
         else
             if compact then
-                table.insert(parts, string.format("+%s %s", compact_amount, suffix))
+                table.insert(parts, string.format("+%s", pg_amount))
             else
-                table.insert(parts, string.format("+%s%s over %s", verbose_amount, verbose_unit, suffix))
+                if pct_amount then
+                    table.insert(parts, string.format("%s/%s over", pg_amount, pct_amount))
+                else
+                    table.insert(parts, string.format("%s over", pg_amount))
+                end
             end
         end
     end
@@ -692,6 +695,27 @@ function ReadingGoal:_sumGlobalBookProgress(entry)
     entry.pages_read = total
 end
 
+function ReadingGoal:_recalculateBookCompletionDailyTarget(dw, curr, key)
+    if not dw or dw.mode ~= "daily" then return end
+    if not dw.completion_days or dw.completion_days <= 0 then return end
+    if not dw.start_date or not dw.total_effective_pages or dw.total_effective_pages <= 0 then return end
+    if dw._target_recalculated_for == key then return end
+
+    local start_stamp = os.time({
+        year = tonumber(string.sub(dw.start_date, 1, 4)),
+        month = tonumber(string.sub(dw.start_date, 6, 7)),
+        day = tonumber(string.sub(dw.start_date, 9, 10)),
+        hour = 0, min = 0, sec = 0,
+    })
+    if not start_stamp then return end
+
+    local elapsed_days = math.floor((os.time() - start_stamp) / 86400)
+    local days_left = math.max(1, dw.completion_days - elapsed_days)
+    local remaining_pages = math.max(0, dw.total_effective_pages - (curr or 0))
+    dw.target_pages = math.max(1, math.ceil(remaining_pages / days_left))
+    dw._target_recalculated_for = key
+end
+
 function ReadingGoal:_trackBookGoal(dw, curr)
     if not dw or not dw.target_pages or dw.target_pages <= 0 then return end
 
@@ -704,6 +728,8 @@ function ReadingGoal:_trackBookGoal(dw, curr)
     else
         key = self:_today()
     end
+
+    self:_recalculateBookCompletionDailyTarget(dw, curr, key)
 
     if not dw.log[key] then
         dw.log[key] = { pages_read = 0, start_page = curr, max_page = curr }
@@ -862,14 +888,9 @@ function ReadingGoal:addToMainMenu(menu_items)
                 text = _("Book goal"),
                 sub_item_table = {
                     {
-                        text = _("Set daily pages by completion timeframe"),
+                        text = _("Set daily completion target by timeframe"),
                         keep_menu_open = true,
-                        callback = function(tmi) self:_showBookCompletionGoalDialog("page", tmi) end,
-                    },
-                    {
-                        text = _("Set daily completion % by timeframe"),
-                        keep_menu_open = true,
-                        callback = function(tmi) self:_showBookCompletionGoalDialog("percentage", tmi) end,
+                        callback = function(tmi) self:_showBookCompletionGoalDialog(tmi) end,
                     },
                 },
             },
@@ -1295,7 +1316,6 @@ function ReadingGoal:_showSetDailyWeeklyDialog(scope, period, touchmenu_instance
             end
         end
 
-        self:_ensureFooterEnabled()
         self:update_status_bars()
         local period_label = period == "weekly" and _("week") or _("day")
         UIManager:show(InfoMessage:new{
@@ -1308,16 +1328,14 @@ function ReadingGoal:_showSetDailyWeeklyDialog(scope, period, touchmenu_instance
     UIManager:show(dlg)
 end
 
-function ReadingGoal:_showBookCompletionGoalDialog(goal_mode, touchmenu_instance)
+function ReadingGoal:_showBookCompletionGoalDialog(touchmenu_instance)
     local total = select(2, self:_getPages())
     if not total or total <= 0 then
         UIManager:show(InfoMessage:new{ text = _("Cannot determine total effective pages for this book") })
         return
     end
 
-    local title = goal_mode == "percentage"
-        and _("Set daily completion % by timeframe")
-        or _("Set daily pages by completion timeframe")
+    local title = _("Set daily completion target by timeframe")
 
     local dlg
     dlg = InputDialog:new{
@@ -1341,27 +1359,25 @@ function ReadingGoal:_showBookCompletionGoalDialog(goal_mode, touchmenu_instance
         local key = self:_today()
         local target_pages
         local info_text
-        if goal_mode == "percentage" then
-            local daily_pct = math.floor(((100 / days) * 10) + 0.5) / 10
-            target_pages = math.max(1, math.ceil((total * daily_pct) / 100))
-            info_text = T(_("Goal set: %1%% daily (~%2 pages/day, %3 days to finish)"), daily_pct, target_pages, days)
-        else
-            target_pages = math.max(1, math.ceil(total / days))
-            info_text = T(_("Goal set: %1 pages per day (%2 pages / %3 days)"), target_pages, total, days)
+        local remaining_total = math.max(0, total - (curr or 0))
+        target_pages = math.max(1, math.ceil(remaining_total / days))
+        local daily_pct = 0
+        if total > 0 then
+            daily_pct = (100 * target_pages) / total
         end
+        info_text = T(_("Goal set: %1 pages/day (~%2%% of book; %3 pages remaining / %4 days)"),
+            target_pages, string.format("%.1f", daily_pct), remaining_total, days)
 
         self.book_daily = {
             mode = "daily",
             target_pages = target_pages,
             start_date = self:_today(),
             last_known_page = curr or 0,
-            goal_mode = goal_mode,
             completion_days = days,
             total_effective_pages = total,
             log = { [key] = { pages_read = 0, start_page = curr or 0, max_page = curr or 0 } },
         }
         self:_persistDailyWeeklyToDoc()
-        self:_ensureFooterEnabled()
         self:update_status_bars()
         UIManager:show(InfoMessage:new{
             text = info_text,
