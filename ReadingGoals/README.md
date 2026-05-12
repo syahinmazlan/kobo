@@ -5,17 +5,17 @@ a lightweight goal plugin focused on three flows:
 - set a **book completion goal** as **"read in x days"**
 - show progress in status bars with compact/non-compact display styles
 
-## how to install
+## current menu structure
 
-1. download the `ReadingGoal.koplugin` folder
-2. put it inside your koreader's `plugins/` directory
-   - kobo: `.adds/koreader/plugins/`
-   - kindle: `koreader/plugins/`
-   - android: `koreader/plugins/`
-3. restart koreader
-4. open a book, go to tools menu, you'll see "reading goal" there
+from **tools → reading goal**:
 
-that's it. no other files need to be changed.
+- **set percentage goal**
+- **set page goal**
+- **book goal**
+  - **read in x days**
+  - **stop book goal**
+- **settings**
+- **stop goal** (stops absolute percentage/page goal)
 
 ## current menu structure
 
