@@ -25,7 +25,7 @@ local ReadingGoal = WidgetContainer:extend{
     reminder_interval = 25,
     reminders_fired = {},
 
-    goal_symbol = "\u{02691}",
+    goal_symbol = "★",
     goal_letter = "G",
 }
 
@@ -48,23 +48,46 @@ function ReadingGoal:init()
 
     self.additional_header_content_func = function()
         local txt = self:_statusBarText()
-        if txt then return self.goal_symbol .. " " .. txt end
+        if not txt then return end
+        if self:_isOverAnyDailyGoal() then
+            return self.goal_symbol .. " " .. txt
+        end
+        return txt
     end
     self.additional_footer_content_func = function()
         local txt = self:_statusBarText()
         if not txt then return end
+        local prefix = self:_isOverAnyDailyGoal() and (self.goal_symbol .. " ") or ""
         local item_prefix = self.ui.view and self.ui.view.footer.settings.item_prefix or "letters"
         if item_prefix == "icons" then
-            return self.goal_symbol .. " " .. txt
+            return prefix .. txt
         elseif item_prefix == "compact_items" then
-            return self.goal_symbol .. txt
+            if prefix ~= "" then
+                return self.goal_symbol .. txt
+            end
+            return txt
         else
-            return self.goal_letter .. ": " .. txt
+            if prefix ~= "" then
+                return self.goal_letter .. ": " .. txt
+            end
+            return txt
         end
     end
 
     self.ui.menu:registerToMainMenu(self)
     self:_loadGoalFromDoc()
+end
+
+function ReadingGoal:_isOverAnyDailyGoal()
+    for _, dw in ipairs(self:_getAllActiveDailyWeekly()) do
+        if dw and dw.target_pages and dw.target_pages > 0 then
+            local read = self:_getDailyWeeklyRead(dw)
+            if read > dw.target_pages then
+                return true
+            end
+        end
+    end
+    return false
 end
 
 function ReadingGoal:onReaderReady()
@@ -115,34 +138,37 @@ function ReadingGoal:_statusBarText()
     for _, dw in ipairs(self:_getAllActiveDailyWeekly()) do
         local read = self:_getDailyWeeklyRead(dw)
         local effective = dw.target_pages
-        local suffix = dw.mode == "weekly" and "wk" or "today"
         local delta = effective - read
-        local use_pct = dw.goal_mode == "percentage"
-            and dw.total_effective_pages and dw.total_effective_pages > 0
+        local use_pct = dw.total_effective_pages and dw.total_effective_pages > 0
             and dw.mode == "daily"
-        local verbose_amount = tostring(math.abs(delta))
-        local verbose_unit = "pg"
-        local compact_amount = tostring(math.abs(delta))
+        local pg_amount = tostring(math.abs(delta)) .. "pg"
+        local pct_amount
         if use_pct then
             local delta_pct = (100 * math.abs(delta)) / dw.total_effective_pages
-            verbose_amount = string.format("%.1f", delta_pct)
-            verbose_unit = "%"
-            compact_amount = string.format("%.1f%%", delta_pct)
+            pct_amount = string.format("%.1f%%", delta_pct)
         end
 
         if delta > 0 then
             if compact then
-                table.insert(parts, string.format("-%s %s", compact_amount, suffix))
+                table.insert(parts, string.format("-%s", pg_amount))
             else
-                table.insert(parts, string.format("-%s%s left %s", verbose_amount, verbose_unit, suffix))
+                if pct_amount then
+                    table.insert(parts, string.format("▸ %s|%s", pg_amount, pct_amount))
+                else
+                    table.insert(parts, string.format("▸ %s", pg_amount))
+                end
             end
         elseif delta == 0 then
-            table.insert(parts, string.format("✓ %s", suffix))
+            table.insert(parts, "★★★")
         else
             if compact then
-                table.insert(parts, string.format("+%s %s", compact_amount, suffix))
+                table.insert(parts, string.format("+%s", pg_amount))
             else
-                table.insert(parts, string.format("+%s%s over %s", verbose_amount, verbose_unit, suffix))
+                if pct_amount then
+                    table.insert(parts, string.format("%s|%s", pg_amount, pct_amount))
+                else
+                    table.insert(parts, string.format("%s", pg_amount))
+                end
             end
         end
     end
@@ -291,10 +317,11 @@ function ReadingGoal:remainingProgress()
     if self.goal_type == "percentage" then
         if not (curr and total and total > 0) then return _("Calculating…") end
         local remaining = math.max(self.goal_percentage - (curr / total) * 100, 0)
+        if remaining == 0 then return "★★★" end
         if compact then
             return string.format("-%.1f%%", remaining)
         end
-        return string.format("%.1f%% left", remaining)
+        return string.format("▸ %.1f%%", remaining)
     elseif self.goal_type == "stable_page" then
         if not stable_idx then return _("Calculating…") end
         local remaining = math.max(self.goal_stable_page_idx - stable_idx, 0)
@@ -305,10 +332,11 @@ function ReadingGoal:remainingProgress()
     else
         if not curr then return _("Calculating…") end
         local remaining = math.max(self.goal_page - curr, 0)
+        if remaining == 0 then return "★★★" end
         if compact then
             return string.format("-%d pg", remaining)
         end
-        return string.format("%d pg left", remaining)
+        return string.format("▸ %dpg", remaining)
     end
 end
 
@@ -692,6 +720,27 @@ function ReadingGoal:_sumGlobalBookProgress(entry)
     entry.pages_read = total
 end
 
+function ReadingGoal:_recalculateBookCompletionDailyTarget(dw, curr, key)
+    if not dw or dw.mode ~= "daily" then return end
+    if not dw.completion_days or dw.completion_days <= 0 then return end
+    if not dw.start_date or not dw.total_effective_pages or dw.total_effective_pages <= 0 then return end
+    if dw._target_recalculated_for == key then return end
+
+    local start_stamp = os.time({
+        year = tonumber(string.sub(dw.start_date, 1, 4)),
+        month = tonumber(string.sub(dw.start_date, 6, 7)),
+        day = tonumber(string.sub(dw.start_date, 9, 10)),
+        hour = 0, min = 0, sec = 0,
+    })
+    if not start_stamp then return end
+
+    local elapsed_days = math.floor((os.time() - start_stamp) / 86400)
+    local days_left = math.max(1, dw.completion_days - elapsed_days)
+    local remaining_pages = math.max(0, dw.total_effective_pages - (curr or 0))
+    dw.target_pages = math.max(1, math.ceil(remaining_pages / days_left))
+    dw._target_recalculated_for = key
+end
+
 function ReadingGoal:_trackBookGoal(dw, curr)
     if not dw or not dw.target_pages or dw.target_pages <= 0 then return end
 
@@ -704,6 +753,8 @@ function ReadingGoal:_trackBookGoal(dw, curr)
     else
         key = self:_today()
     end
+
+    self:_recalculateBookCompletionDailyTarget(dw, curr, key)
 
     if not dw.log[key] then
         dw.log[key] = { pages_read = 0, start_page = curr, max_page = curr }
@@ -819,57 +870,23 @@ function ReadingGoal:addToMainMenu(menu_items)
                 end,
                 keep_menu_open = true,
                 callback = function(tmi) self:_showAbsoluteGoalDialog("page", tmi) end,
-            },
-            {
-                text_func = function()
-                    if self:_hasStablePages() then
-                        local _c, _t, _sl, idx = self:_getPages()
-                        local cur = idx and string.format(" (current: %d)", idx) or ""
-                        return _("Set stable page goal") .. cur
-                    else
-                        return _("Set stable page goal (N/A)")
-                    end
-                end,
-                enabled_func = function() return self:_hasStablePages() end,
-                keep_menu_open = true,
-                callback = function(tmi) self:_showAbsoluteGoalDialog("stable_page", tmi) end,
-                separator = true,
-            },
-            {
-                text = _("Read X% more"),
-                keep_menu_open = true,
-                callback = function(tmi) self:_showRelativeGoalDialog("percentage", tmi) end,
-            },
-            {
-                text = _("Read X more pages"),
-                keep_menu_open = true,
-                callback = function(tmi) self:_showRelativeGoalDialog("page", tmi) end,
-            },
-            {
-                text_func = function()
-                    if self:_hasStablePages() then
-                        return _("Read X more stable pages")
-                    else
-                        return _("Read X more stable pages (N/A)")
-                    end
-                end,
-                enabled_func = function() return self:_hasStablePages() end,
-                keep_menu_open = true,
-                callback = function(tmi) self:_showRelativeGoalDialog("stable_page", tmi) end,
                 separator = true,
             },
             {
                 text = _("Book goal"),
                 sub_item_table = {
                     {
-                        text = _("Set daily pages by completion timeframe"),
+                        text = _("Read in X days"),
                         keep_menu_open = true,
-                        callback = function(tmi) self:_showBookCompletionGoalDialog("page", tmi) end,
+                        callback = function(tmi) self:_showBookCompletionGoalDialog(tmi) end,
                     },
                     {
-                        text = _("Set daily completion % by timeframe"),
+                        text = _("Stop book goal"),
                         keep_menu_open = true,
-                        callback = function(tmi) self:_showBookCompletionGoalDialog("percentage", tmi) end,
+                        enabled_func = function()
+                            return self.book_daily and self.book_daily.completion_days and self.book_daily.target_pages and self.book_daily.target_pages > 0
+                        end,
+                        callback = function(tmi) self:_stopBookGoal(tmi) end,
                     },
                 },
             },
@@ -932,82 +949,6 @@ function ReadingGoal:addToMainMenu(menu_items)
                 keep_menu_open = true,
                 enabled_func = function() return self:goalActive() end,
                 callback = function(tmi) self:onStopGoal(tmi) end,
-                separator = true,
-            },
-            {
-                text_func = function()
-                    local all = self:_getAllActiveDailyWeekly()
-                    if #all > 0 then
-                        local parts = {}
-                        for _, dw in ipairs(all) do
-                            local read = self:_getDailyWeeklyRead(dw)
-                            table.insert(parts, string.format("%d/%d", read, dw.target_pages))
-                        end
-                        return T(_("Daily/Weekly goals (%1)"), table.concat(parts, ", "))
-                    end
-                    return _("Daily/Weekly goals")
-                end,
-                sub_item_table = {
-                    {
-                        text_func = function()
-                            if self.book_daily and self.book_daily.target_pages and self.book_daily.target_pages > 0 then
-                                local read = self:_getDailyWeeklyRead(self.book_daily)
-                                return T(_("Set daily goal (this book) (%1/%2)"), read, self.book_daily.target_pages)
-                            end
-                            return _("Set daily goal (this book)")
-                        end,
-                        keep_menu_open = true,
-                        callback = function(tmi) self:_showSetDailyWeeklyDialog("book", "daily", tmi) end,
-                    },
-                    {
-                        text_func = function()
-                            if self.book_weekly and self.book_weekly.target_pages and self.book_weekly.target_pages > 0 then
-                                local read = self:_getDailyWeeklyRead(self.book_weekly)
-                                return T(_("Set weekly goal (this book) (%1/%2)"), read, self.book_weekly.target_pages)
-                            end
-                            return _("Set weekly goal (this book)")
-                        end,
-                        keep_menu_open = true,
-                        callback = function(tmi) self:_showSetDailyWeeklyDialog("book", "weekly", tmi) end,
-                        separator = true,
-                    },
-                    {
-                        text_func = function()
-                            local gd = self.settings.global_daily
-                            if gd and gd.target_pages and gd.target_pages > 0 then
-                                local read = self:_getDailyWeeklyRead(gd)
-                                return T(_("Set daily goal (all books) (%1/%2)"), read, gd.target_pages)
-                            end
-                            return _("Set daily goal (all books)")
-                        end,
-                        keep_menu_open = true,
-                        callback = function(tmi) self:_showSetDailyWeeklyDialog("global", "daily", tmi) end,
-                    },
-                    {
-                        text_func = function()
-                            local gw = self.settings.global_weekly
-                            if gw and gw.target_pages and gw.target_pages > 0 then
-                                local read = self:_getDailyWeeklyRead(gw)
-                                return T(_("Set weekly goal (all books) (%1/%2)"), read, gw.target_pages)
-                            end
-                            return _("Set weekly goal (all books)")
-                        end,
-                        keep_menu_open = true,
-                        callback = function(tmi) self:_showSetDailyWeeklyDialog("global", "weekly", tmi) end,
-                        separator = true,
-                    },
-                    {
-                        text = _("View progress"),
-                        keep_menu_open = true,
-                        callback = function() self:_showDailyWeeklyProgress() end,
-                    },
-                    {
-                        text = _("Stop daily/weekly goals"),
-                        keep_menu_open = true,
-                        enabled_func = function() return self:_dailyWeeklyActive() end,
-                        callback = function(tmi) self:_stopDailyWeekly(tmi) end,
-                    },
-                },
             },
         },
     }
@@ -1202,26 +1143,8 @@ end
 ReadingGoal.goal_callback = function(self)
     if not self:goalActive() then return end
     local tip_text = _("Goal reached!")
-    if self.last_goal_percentage > 0 then
-        local box
-        box = ConfirmBox:new{
-            text = tip_text,
-            ok_text = _("Repeat"),
-            ok_callback = function()
-                UIManager:close(box)
-                self:setGoal(self.last_goal_percentage, "percentage")
-            end,
-            cancel_text = _("Done"),
-            cancel_callback = function()
-                self.last_goal_percentage = 0
-                self:_persistGoalToDoc()
-            end,
-        }
-        UIManager:show(box)
-    else
-        UIManager:show(InfoMessage:new{ text = tip_text })
-    end
     self:unscheduleGoal()
+    UIManager:show(InfoMessage:new{ text = tip_text })
 end
 
 function ReadingGoal:_showSetDailyWeeklyDialog(scope, period, touchmenu_instance)
@@ -1295,7 +1218,6 @@ function ReadingGoal:_showSetDailyWeeklyDialog(scope, period, touchmenu_instance
             end
         end
 
-        self:_ensureFooterEnabled()
         self:update_status_bars()
         local period_label = period == "weekly" and _("week") or _("day")
         UIManager:show(InfoMessage:new{
@@ -1308,16 +1230,14 @@ function ReadingGoal:_showSetDailyWeeklyDialog(scope, period, touchmenu_instance
     UIManager:show(dlg)
 end
 
-function ReadingGoal:_showBookCompletionGoalDialog(goal_mode, touchmenu_instance)
+function ReadingGoal:_showBookCompletionGoalDialog(touchmenu_instance)
     local total = select(2, self:_getPages())
     if not total or total <= 0 then
         UIManager:show(InfoMessage:new{ text = _("Cannot determine total effective pages for this book") })
         return
     end
 
-    local title = goal_mode == "percentage"
-        and _("Set daily completion % by timeframe")
-        or _("Set daily pages by completion timeframe")
+    local title = _("Read in X days")
 
     local dlg
     dlg = InputDialog:new{
@@ -1340,38 +1260,56 @@ function ReadingGoal:_showBookCompletionGoalDialog(goal_mode, touchmenu_instance
         local curr = self:_getPages()
         local key = self:_today()
         local target_pages
-        local info_text
-        if goal_mode == "percentage" then
-            local daily_pct = math.floor(((100 / days) * 10) + 0.5) / 10
-            target_pages = math.max(1, math.ceil((total * daily_pct) / 100))
-            info_text = T(_("Goal set: %1%% daily (~%2 pages/day, %3 days to finish)"), daily_pct, target_pages, days)
-        else
-            target_pages = math.max(1, math.ceil(total / days))
-            info_text = T(_("Goal set: %1 pages per day (%2 pages / %3 days)"), target_pages, total, days)
+        local remaining_total = math.max(0, total - (curr or 0))
+        target_pages = math.max(1, math.ceil(remaining_total / days))
+        local daily_pct = 0
+        if total > 0 then
+            daily_pct = (100 * target_pages) / total
         end
+        local daily_pct_display = string.format("%.0f", daily_pct)
 
-        self.book_daily = {
-            mode = "daily",
-            target_pages = target_pages,
-            start_date = self:_today(),
-            last_known_page = curr or 0,
-            goal_mode = goal_mode,
-            completion_days = days,
-            total_effective_pages = total,
-            log = { [key] = { pages_read = 0, start_page = curr or 0, max_page = curr or 0 } },
+        local confirm_text = T(_("Set book goal to finish in %1 days?\n\nDaily target: %2 pages/day\nApprox: %3% of book/day\nRemaining: %4 pages"),
+            days, target_pages, daily_pct_display, remaining_total)
+
+        local box
+        box = ConfirmBox:new{
+            text = confirm_text,
+            ok_text = _("Set goal"),
+            ok_callback = function()
+                UIManager:close(box)
+                self.book_daily = {
+                    mode = "daily",
+                    target_pages = target_pages,
+                    start_date = self:_today(),
+                    last_known_page = curr or 0,
+                    completion_days = days,
+                    total_effective_pages = total,
+                    log = { [key] = { pages_read = 0, start_page = curr or 0, max_page = curr or 0 } },
+                }
+                self:_persistDailyWeeklyToDoc()
+                self:update_status_bars()
+                UIManager:show(InfoMessage:new{
+                    text = _("Goal set!"),
+                    timeout = 5,
+                })
+                if touchmenu_instance then touchmenu_instance:updateItems() end
+            end,
+            cancel_text = _("Cancel"),
         }
-        self:_persistDailyWeeklyToDoc()
-        self:_ensureFooterEnabled()
-        self:update_status_bars()
-        UIManager:show(InfoMessage:new{
-            text = info_text,
-            timeout = 5,
-        })
-
-        if touchmenu_instance then touchmenu_instance:updateItems() end
+        UIManager:show(box)
     end
 
     UIManager:show(dlg)
+end
+
+function ReadingGoal:_stopBookGoal(touchmenu_instance)
+    if self.book_daily and self.book_daily.completion_days then
+        self.book_daily = nil
+        self:_persistDailyWeeklyToDoc()
+        self:update_status_bars()
+        UIManager:show(InfoMessage:new{ text = _("Book goal stopped") })
+    end
+    if touchmenu_instance then touchmenu_instance:updateItems() end
 end
 
 function ReadingGoal:_appendProgressLines(lines, dw, header)
