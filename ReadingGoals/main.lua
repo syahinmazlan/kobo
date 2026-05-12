@@ -25,7 +25,7 @@ local ReadingGoal = WidgetContainer:extend{
     reminder_interval = 25,
     reminders_fired = {},
 
-    goal_symbol = "\u{02691}",
+    goal_symbol = "★",
     goal_letter = "G",
 }
 
@@ -153,13 +153,13 @@ function ReadingGoal:_statusBarText()
                 table.insert(parts, string.format("-%s", pg_amount))
             else
                 if pct_amount then
-                    table.insert(parts, string.format("▶ %s|%s", pg_amount, pct_amount))
+                    table.insert(parts, string.format("▸ %s|%s", pg_amount, pct_amount))
                 else
-                    table.insert(parts, string.format("▶ %s", pg_amount))
+                    table.insert(parts, string.format("▸ %s", pg_amount))
                 end
             end
         elseif delta == 0 then
-            table.insert(parts, "✓")
+            table.insert(parts, "★★★")
         else
             if compact then
                 table.insert(parts, string.format("+%s", pg_amount))
@@ -317,10 +317,11 @@ function ReadingGoal:remainingProgress()
     if self.goal_type == "percentage" then
         if not (curr and total and total > 0) then return _("Calculating…") end
         local remaining = math.max(self.goal_percentage - (curr / total) * 100, 0)
+        if remaining == 0 then return "★★★" end
         if compact then
             return string.format("-%.1f%%", remaining)
         end
-        return string.format("%.1f%% left", remaining)
+        return string.format("▸ %.1f%%", remaining)
     elseif self.goal_type == "stable_page" then
         if not stable_idx then return _("Calculating…") end
         local remaining = math.max(self.goal_stable_page_idx - stable_idx, 0)
@@ -331,10 +332,11 @@ function ReadingGoal:remainingProgress()
     else
         if not curr then return _("Calculating…") end
         local remaining = math.max(self.goal_page - curr, 0)
+        if remaining == 0 then return "★★★" end
         if compact then
             return string.format("-%d pg", remaining)
         end
-        return string.format("%d pg left", remaining)
+        return string.format("▸ %dpg", remaining)
     end
 end
 
@@ -1141,26 +1143,8 @@ end
 ReadingGoal.goal_callback = function(self)
     if not self:goalActive() then return end
     local tip_text = _("Goal reached!")
-    if self.last_goal_percentage > 0 then
-        local box
-        box = ConfirmBox:new{
-            text = tip_text,
-            ok_text = _("Repeat"),
-            ok_callback = function()
-                UIManager:close(box)
-                self:setGoal(self.last_goal_percentage, "percentage")
-            end,
-            cancel_text = _("Done"),
-            cancel_callback = function()
-                self.last_goal_percentage = 0
-                self:_persistGoalToDoc()
-            end,
-        }
-        UIManager:show(box)
-    else
-        UIManager:show(InfoMessage:new{ text = tip_text })
-    end
     self:unscheduleGoal()
+    UIManager:show(InfoMessage:new{ text = tip_text })
 end
 
 function ReadingGoal:_showSetDailyWeeklyDialog(scope, period, touchmenu_instance)
@@ -1276,33 +1260,43 @@ function ReadingGoal:_showBookCompletionGoalDialog(touchmenu_instance)
         local curr = self:_getPages()
         local key = self:_today()
         local target_pages
-        local info_text
         local remaining_total = math.max(0, total - (curr or 0))
         target_pages = math.max(1, math.ceil(remaining_total / days))
         local daily_pct = 0
         if total > 0 then
             daily_pct = (100 * target_pages) / total
         end
-        info_text = T(_("Goal set: %1 pages/day (~%2%% of book; %3 pages remaining / %4 days)"),
-            target_pages, string.format("%.1f", daily_pct), remaining_total, days)
+        local daily_pct_display = string.format("%.0f", daily_pct)
 
-        self.book_daily = {
-            mode = "daily",
-            target_pages = target_pages,
-            start_date = self:_today(),
-            last_known_page = curr or 0,
-            completion_days = days,
-            total_effective_pages = total,
-            log = { [key] = { pages_read = 0, start_page = curr or 0, max_page = curr or 0 } },
+        local confirm_text = T(_("Set book goal to finish in %1 days?\n\nDaily target: %2 pages/day\nApprox: %3% of book/day\nRemaining: %4 pages"),
+            days, target_pages, daily_pct_display, remaining_total)
+
+        local box
+        box = ConfirmBox:new{
+            text = confirm_text,
+            ok_text = _("Set goal"),
+            ok_callback = function()
+                UIManager:close(box)
+                self.book_daily = {
+                    mode = "daily",
+                    target_pages = target_pages,
+                    start_date = self:_today(),
+                    last_known_page = curr or 0,
+                    completion_days = days,
+                    total_effective_pages = total,
+                    log = { [key] = { pages_read = 0, start_page = curr or 0, max_page = curr or 0 } },
+                }
+                self:_persistDailyWeeklyToDoc()
+                self:update_status_bars()
+                UIManager:show(InfoMessage:new{
+                    text = _("Goal set!"),
+                    timeout = 5,
+                })
+                if touchmenu_instance then touchmenu_instance:updateItems() end
+            end,
+            cancel_text = _("Cancel"),
         }
-        self:_persistDailyWeeklyToDoc()
-        self:update_status_bars()
-        UIManager:show(InfoMessage:new{
-            text = info_text,
-            timeout = 5,
-        })
-
-        if touchmenu_instance then touchmenu_instance:updateItems() end
+        UIManager:show(box)
     end
 
     UIManager:show(dlg)
