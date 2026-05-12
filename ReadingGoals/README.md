@@ -38,6 +38,7 @@ from **tools → reading goal**:
 - **set percentage goal**: target a specific book percentage (example: 75%).
 - **set page goal**: target a specific page number.
 - optional progress reminders can notify you in intervals while you work toward the goal.
+- when an absolute goal is reached, the plugin shows **"Goal reached!"** and stops that goal (no repeat prompt).
 
 ### 2) book goal: "read in x days"
 
@@ -70,10 +71,24 @@ the plugin can show your progress in the status bar and/or the alt status bar. t
 - tools → reading goal → settings → **display goal in status bar: on/off**
 - tools → reading goal → settings → **display goal in alt status bar: on/off**
 
-- percentage/page absolute goals use direct remaining output (e.g. `⚑ 14.3% left`, `⚑ 42 pg left`).
-- book-goal daily target status uses compact toggle:
-  - **compact off:** verbose format with pages and optional percent (e.g. `⚑ 25pg/5.0% left`, `⚑ 19pg/3.8% over`)
-  - **compact on:** short signed-page format (e.g. `⚑ -25pg`, `⚑ +19pg`)
+- absolute goal labels:
+  - in-progress (non-compact): `▸ 14.3%`, `▸ 42pg`
+  - in-progress (compact): `-14.3%`, `-42 pg`
+  - exact completion: `★★★`
+
+- book-goal daily target labels (compact toggle):
+  - **compact off:** verbose page/percent format  
+    - under target: `▸ 25pg|5.0%`
+    - exact target: `★★★`
+    - over target: `19pg|3.8%`
+  - **compact on:** signed-page format  
+    - under target: `-25pg`
+    - exact target: `★★★`
+    - over target: `+19pg`
+
+- over-goal prefix indicator:
+  - header/footer uses `★` as the goal symbol only when a daily target is exceeded.
+  - when not over target, the star prefix is not shown.
 
 toggle compact style from:
 - tools → reading goal → settings → **compact status display: on/off**
