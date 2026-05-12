@@ -153,6 +153,7 @@ function ReadingGoal:_statusBarText()
                 table.insert(parts, string.format("-%s", pg_amount))
             else
                 if pct_amount then
+<<<<<<< codex/update-daily-reading-goals-based-on-progress-56j5i6
                     table.insert(parts, string.format("▸ %s|%s", pg_amount, pct_amount))
                 else
                     table.insert(parts, string.format("▸ %s", pg_amount))
@@ -160,6 +161,15 @@ function ReadingGoal:_statusBarText()
             end
         elseif delta == 0 then
             table.insert(parts, "★★★")
+=======
+                    table.insert(parts, string.format("▶ %s|%s", pg_amount, pct_amount))
+                else
+                    table.insert(parts, string.format("▶ %s", pg_amount))
+                end
+            end
+        elseif delta == 0 then
+            table.insert(parts, "✓")
+>>>>>>> main
         else
             if compact then
                 table.insert(parts, string.format("+%s", pg_amount))
@@ -1284,15 +1294,39 @@ function ReadingGoal:_showBookCompletionGoalDialog(touchmenu_instance)
         local curr = self:_getPages()
         local key = self:_today()
         local target_pages
+<<<<<<< codex/update-daily-reading-goals-based-on-progress-56j5i6
+=======
+        local info_text
+>>>>>>> main
         local remaining_total = math.max(0, total - (curr or 0))
         target_pages = math.max(1, math.ceil(remaining_total / days))
         local daily_pct = 0
         if total > 0 then
             daily_pct = (100 * target_pages) / total
         end
+        info_text = T(_("Goal set: %1 pages/day (~%2%% of book; %3 pages remaining / %4 days)"),
+            target_pages, string.format("%.1f", daily_pct), remaining_total, days)
 
+<<<<<<< codex/update-daily-reading-goals-based-on-progress-56j5i6
         local confirm_text = T(_("Set book goal to finish in %1 days?\n\nDaily target: %2 pages/day\nApprox: %3% of book/day\nRemaining: %4 pages"),
             days, target_pages, string.format("%.1f", daily_pct), remaining_total)
+=======
+        self.book_daily = {
+            mode = "daily",
+            target_pages = target_pages,
+            start_date = self:_today(),
+            last_known_page = curr or 0,
+            completion_days = days,
+            total_effective_pages = total,
+            log = { [key] = { pages_read = 0, start_page = curr or 0, max_page = curr or 0 } },
+        }
+        self:_persistDailyWeeklyToDoc()
+        self:update_status_bars()
+        UIManager:show(InfoMessage:new{
+            text = info_text,
+            timeout = 5,
+        })
+>>>>>>> main
 
         local box
         box = ConfirmBox:new{
