@@ -3,6 +3,6 @@ return {
     name = "readinggoal",
     fullname = _("Reading goal"),
     version = 3,
-    description = _([[Set reading goals by %, pages, or stable pages. Supports relative goals, configurable reminders, and daily/weekly targets. Shows progress (⚑) in status bars.]]),
-    author = "ardabooo",
+    description = _([[Set reading goals by % or pages, plus a "Read in X days" book completion goal with adaptive daily targets and compact status labels.]]),
+    author = "ardabooo (forked by myself)",
 }
