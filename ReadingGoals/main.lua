@@ -25,7 +25,7 @@ local ReadingGoal = WidgetContainer:extend{
     reminder_interval = 25,
     reminders_fired = {},
 
-    goal_symbol = "\u{0273F}",
+    goal_symbol = "\u{02740}",
     goal_letter = "G",
 }
 
