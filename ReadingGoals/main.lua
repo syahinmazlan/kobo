@@ -1320,6 +1320,8 @@ function ReadingGoal:_showBookCompletionGoalDialog(touchmenu_instance)
         if total > 0 then
             daily_pct = (100 * target_pages) / total
         end
+        info_text = T(_("Goal set: %1 pages/day (~%2%% of book; %3 pages remaining / %4 days)"),
+            target_pages, string.format("%.1f", daily_pct), remaining_total, days)
 
         local confirm_text = T(_("Set book goal to finish in %1 days?\n\nDaily target: %2 pages/day\nApprox: %3%% of book/day\nRemaining: %4 pages"),
             days, target_pages, string.format("%.1f", daily_pct), remaining_total)
