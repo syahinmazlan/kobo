@@ -89,12 +89,3 @@ the plugin can show your progress in the status bar and/or the alt status bar. t
 toggle compact style from:
 - tools → reading goal → settings → **compact status display: on/off**
 
-## compatibility
-
-- works on koreader v2025.10 and later
-- works on all devices (kobo, kindle, android, pocketbook, etc.)
-- if you had an older version of this plugin, your existing goal data will carry over automatically
-
-## license
-
-agpl-3.0 (same as koreader)
