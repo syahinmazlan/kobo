@@ -899,6 +899,12 @@ local function buildGoalSection(ui, state, book_data, has_ui, total_width, color
     end
     local subtitle_lines = {}
     local goal_achieved, goal_progress, icon
+    local show_goal_progress = getSettingWithDefault(SETTINGS.SHOW_GOAL_PROGRESS, USER_CONFIG.SHOW_GOAL_PROGRESS)
+    local show_pages_subtitle = getSettingWithDefault(SETTINGS.SHOW_GOAL_PAGES_SUBTITLE, USER_CONFIG.SHOW_GOAL_PAGES_SUBTITLE)
+
+    if show_pages_subtitle then
+        table.insert(subtitle_lines, string.format(_("%dpg read today"), day_pages or 0))
+    end
 
     if goal_type == "time" then
         local daily_goal_minutes = getSetting("DAILY_GOAL_MINUTES") or USER_CONFIG.DAILY_GOAL_MINUTES or 30
@@ -930,12 +936,16 @@ local function buildGoalSection(ui, state, book_data, has_ui, total_width, color
             else
                 target_str = string.format("%d %s", daily_goal_minutes, ngettext("min", "mins", daily_goal_minutes))
             end
-            local status = goal_achieved and _("Achieved!") or (goal_pct .. "%")
-            table.insert(subtitle_lines, string.format("%s · %s %s", status, target_str, _("goal")))
+            local status = goal_achieved and _("Achieved!") or (show_goal_progress and (goal_pct .. "%") or nil)
+            if status then
+                table.insert(subtitle_lines, string.format("%s · %s %s", status, target_str, _("goal")))
+            else
+                table.insert(subtitle_lines, string.format("%s %s", target_str, _("goal")))
+            end
         else
             table.insert(subtitle_lines, goal_achieved
                 and _("Goal achieved!")
-                or string.format(_("%d%% of goal"), goal_pct))
+                or (show_goal_progress and string.format(_("%d%% of goal"), goal_pct) or _("Goal in progress")))
         end
 
     else
@@ -954,13 +964,17 @@ local function buildGoalSection(ui, state, book_data, has_ui, total_width, color
 
         local show_goal_pages = getSettingWithDefault(SETTINGS.SHOW_GOAL_PAGES, USER_CONFIG.SHOW_GOAL_PAGES)
         if show_goal_pages then
-            local status = goal_achieved and _("Achieved!") or (goal_pct .. "%")
-            table.insert(subtitle_lines, string.format("%s · %s", status,
-                string.format(_("%d page goal"), daily_goal)))
+            local status = goal_achieved and _("Achieved!") or (show_goal_progress and (goal_pct .. "%") or nil)
+            if status then
+                table.insert(subtitle_lines, string.format("%s · %s", status,
+                    string.format(_("%d page goal"), daily_goal)))
+            else
+                table.insert(subtitle_lines, string.format(_("%d page goal"), daily_goal))
+            end
         else
             table.insert(subtitle_lines, goal_achieved
                 and _("Goal achieved!")
-                or string.format(_("%d%% of goal"), goal_pct))
+                or (show_goal_progress and string.format(_("%d%% of goal"), goal_pct) or _("Goal in progress")))
         end
     end
 

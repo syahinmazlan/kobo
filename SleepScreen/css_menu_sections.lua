@@ -294,6 +294,20 @@ local function buildGoalSectionContentMenu()
                 PluginStore:flipNilOrTrue(SETTINGS.SHOW_GOAL_PAGES)
             end,
         },
+        {
+            text      = _("Show goal progress"),
+            help_text = _("Show goal progress percentage (e.g. 65% of goal). Disable to hide the percentage status."),
+            checked_func = function()
+                local val = PluginStore:readSetting(SETTINGS.SHOW_GOAL_PROGRESS)
+                return val == nil or val == true
+            end,
+            callback = function()
+                PluginStore:flipNilOrTrue(SETTINGS.SHOW_GOAL_PROGRESS)
+            end,
+        },
+        createToggleItem(_("Show pages read today as subtitle"),
+            _("Display pages read today as subtitle text (e.g. '35pg read today') below the title."),
+            SETTINGS.SHOW_GOAL_PAGES_SUBTITLE, false),
     }
 end
 
