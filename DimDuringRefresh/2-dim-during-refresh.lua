@@ -56,6 +56,35 @@ local function has_document_open()
     return ReaderUI.instance ~= nil and ReaderUI.instance.document ~= nil
 end
 
+-- Helper: check if the frontlight is actually on
+local function is_frontlight_on()
+    local powerd = Device.powerd
+    if not powerd then
+        return false
+    end
+
+    if type(powerd.isFrontlightOn) == "function" then
+        return powerd:isFrontlightOn()
+    end
+    if type(powerd.frontlightOn) == "function" then
+        return powerd:frontlightOn()
+    end
+
+    if powerd.is_fl_on ~= nil then
+        return powerd.is_fl_on
+    end
+    if powerd.fl_is_on ~= nil then
+        return powerd.fl_is_on
+    end
+    if powerd.frontlight_on ~= nil then
+        return powerd.frontlight_on
+    end
+
+    local intensity = powerd.fl_intensity
+    local minimum = powerd.fl_min or 0
+    return intensity and intensity > minimum
+end
+
 -- Helper: get the current page number
 local function get_current_page()
     local ui = ReaderUI.instance
@@ -169,7 +198,7 @@ function UIManager._refresh(self, refresh_mode, region, dither)
     -- Save & disable frontlight before refresh
     local intensity = Device.powerd.fl_intensity
 
-    if intensity and not dimmed and intensity > DimLevel.get() then
+    if intensity and is_frontlight_on() and not dimmed and intensity > DimLevel.get() then
         if RelativeDimFrontlightRefresh.get() then
             Device.powerd:setIntensity(intensity - DimLevel.get())
         else
