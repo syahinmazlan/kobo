@@ -435,10 +435,10 @@ local function getSessionStats(book_id, days)
     return out
 end
 
-local function getCurrentSessionDuration(book_id, start_current_period)
-    if not book_id or not start_current_period then return 0 end
+local function getCurrentSessionStats(book_id, start_current_period)
+    if not book_id or not start_current_period then return 0, 0 end
     local conn = getDB()
-    if not conn then return 0 end
+    if not conn then return 0, 0 end
 
     local sql_stmt = [[
         SELECT count(*),
@@ -446,17 +446,18 @@ local function getCurrentSessionDuration(book_id, start_current_period)
         FROM (
             SELECT sum(duration) AS sum_duration
             FROM page_stat
-            WHERE start_time >= %d
+            WHERE id_book = %d
+              AND start_time >= %d
             GROUP BY id_book, page
         );
     ]]
-    local _, current_duration = conn:rowexec(string.format(sql_stmt, start_current_period))
+    local page_count, current_duration = conn:rowexec(string.format(sql_stmt, book_id, start_current_period))
     conn:close()
 
     if current_duration == nil then
         current_duration = 0
     end
-    return tonumber(current_duration) or 0
+    return tonumber(page_count) or 0, tonumber(current_duration) or 0
 end
 
 local function getBookTitle(ui)
@@ -956,7 +957,6 @@ function ReadingStatsTable:buildContent()
 
     local title_row = title
 
-    local all_time = sumDuration(all_stats)
     local valid_pages_total, valid_duration_total, valid_sessions_total = getValidSessionTotals(all_stats)
     local visible_speed = "-"
     if valid_sessions_total > 0 and valid_duration_total > 0 then
@@ -1021,7 +1021,7 @@ function ReadingStatsTable:buildContent()
         right_stats,
     }
 
-    local session_duration = getCurrentSessionDuration(
+    local session_pages, session_duration = getCurrentSessionStats(
         book_id,
         self.stats_plugin and self.stats_plugin.start_current_period
     )
@@ -1032,27 +1032,14 @@ function ReadingStatsTable:buildContent()
         end
     end
 
-    local session_widget = HorizontalGroup:new{
-        TextWidget:new{
-            text = "This session: ",
-            face = self.fonts.session or self.fonts.cell,
-        },
-        TextWidget:new{
-            text = formatSeconds(session_duration),
-            face = self.fonts.session_bold or self.fonts.session or self.fonts.cell,
-        },
+    local session_speed = "-"
+    if session_pages > 0 and session_duration > 0 then
+        session_speed = string.format("%.0f %s", (session_pages * 3600) / session_duration, _("pg/hr"))
+    end
+    local session_widget = TextWidget:new{
+        text = string.format("This session: %s, %s", formatSeconds(session_duration), session_speed),
+        face = self.fonts.session_bold or self.fonts.session or self.fonts.cell,
     }
-
-    local summary_widget = TextWidget:new{
-        text = string.format("%s: %s · %s %s · %s %s",
-            _("Summary"),
-            formatDurationCompact(all_time),
-            formatProgressTotal((all_stats[1] and all_stats[1].progress) or 0), _("total"),
-            formatProgressDelta((all_stats[1] and all_stats[1].delta_progress) or 0), _("gain")),
-        face = self.fonts.summary,
-    }
-
-    local summary_block = summary_widget
 
     local header = buildTableHeader(self.fonts, self.layout)
     local rows = buildTableRows(stats_data, self.fonts, self.layout)
@@ -1073,19 +1060,17 @@ function ReadingStatsTable:buildContent()
 
     local title_frame = makeFrame(title_row, Size.padding.default, Size.padding.tiny or 2)
     local stats_frame = makeFrame(stats_widget, 0, Size.padding.tiny or 2)
-    local session_frame = makeFrame(session_widget, 0, Size.padding.small)
     local rows_frame = makeFrame(rows, Size.padding.small, Size.padding.small)
-    local summary_frame = makeFrame(summary_block, Size.padding.small, Size.padding.small)
+    local summary_frame = makeFrame(session_widget, Size.padding.small, Size.padding.small)
 
     table.insert(table_content, title_frame)
     table.insert(table_content, stats_frame)
-    table.insert(table_content, session_frame)
     table.insert(table_content, header)
     table.insert(table_content, rows_frame)
     table.insert(table_content, summary_frame)
 
     local current_y = title_frame:getSize().h + stats_frame:getSize().h
-        + session_frame:getSize().h + header:getSize().h + rows_frame:getSize().h + summary_frame:getSize().h
+        + header:getSize().h + rows_frame:getSize().h + summary_frame:getSize().h
 
     self._chart_hit = nil
 
