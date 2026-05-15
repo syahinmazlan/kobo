@@ -29,16 +29,12 @@ from **tools → reading goal**:
 - **settings**
 - **stop goal** (stops absolute percentage/page goal)
 
-> note: older menu sections like "read x more…" and "daily/weekly goals" are intentionally removed to keep the plugin focused on the book-completion workflow.
-
 ## feature logic
 
 ### 1) absolute goals (percentage/page)
 
 - **set percentage goal**: target a specific book percentage (example: 75%).
 - **set page goal**: target a specific page number.
-- optional progress reminders can notify you in intervals while you work toward the goal.
-- when an absolute goal is reached, the plugin shows **"Goal reached!"** and stops that goal (no repeat prompt).
 
 ### 2) book goal: "read in x days"
 
@@ -93,12 +89,3 @@ the plugin can show your progress in the status bar and/or the alt status bar. t
 toggle compact style from:
 - tools → reading goal → settings → **compact status display: on/off**
 
-## compatibility
-
-- works on koreader v2025.10 and later
-- works on all devices (kobo, kindle, android, pocketbook, etc.)
-- if you had an older version of this plugin, your existing goal data will carry over automatically
-
-## license
-
-agpl-3.0 (same as koreader)
