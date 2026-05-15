@@ -283,17 +283,12 @@ local function buildGoalSectionContentMenu()
         createToggleItem(_("Show weekly progress"),
             _("Days this week you have met your reading goal, shown as completed days out of the current weekday (Monday = 1... Sunday = 7). For example: Thursday with goals met on Monday and Tuesday will show 2/4."),
             SETTINGS.SHOW_GOAL_ACHIEVEMENT, false),
-        {   
-            text      = _("Show daily goal"),
-            help_text = _("Target page mode: e.g. 50 page goal. Target time mode: e.g. 1hr 15min time goal."),
-            checked_func = function()
-                local val = PluginStore:readSetting(SETTINGS.SHOW_GOAL_PAGES)
-                return val == nil or val == true
-            end,
-            callback = function()
-                PluginStore:flipNilOrTrue(SETTINGS.SHOW_GOAL_PAGES)
-            end,
-        },
+        createToggleItem(_("Clean look"),
+            _("Hide daily goal target/details and all goal status labels (including percentages and goal achieved/in-progress text)."),
+            SETTINGS.SHOW_GOAL_CLEAN_LOOK, false),
+        createToggleItem(_("Show pages read today as subtitle"),
+            _("Display pages read today as subtitle text (e.g. '35pg read today') below the title."),
+            SETTINGS.SHOW_GOAL_PAGES_SUBTITLE, false),
     }
 end
 

@@ -881,25 +881,22 @@ local function buildGoalSection(ui, state, book_data, has_ui, total_width, color
 
     local goal_title
     do
-        local time_str  = formatDuration(day_dur) or _("0 mins")
-        local pages_str = tostring(day_pages or 0)
-        local goal_title_type = getSetting("GOAL_TITLE_TYPE") or USER_CONFIG.GOAL_TITLE_TYPE or "time"
-
-        if goal_title_type == "pages" then
-            local page_word = ngettext("page", "pages", day_pages or 0)
-            goal_title = string.format(_("%s %s read today"), pages_str, page_word)
-            
-        elseif goal_title_type == "both" then
-            local page_word = (day_pages == 1) and _("pg") or _("pgs")
-            goal_title = string.format(_("%s %s & %s read today"), pages_str, page_word, time_str)
-            
+        local day_dur_safe = day_dur or 0
+        local total_mins   = math.floor(day_dur_safe / 60)
+        local hours        = math.floor(total_mins / 60)
+        local mins         = total_mins % 60
+        local time_compact
+        if hours > 0 then
+            time_compact = string.format(_("%dh %dm"), hours, mins)
         else
-            goal_title = string.format(_("%s read today"), time_str)
+            time_compact = string.format(_("%dm"), mins)
         end
+        goal_title = string.format(_("%s • %dpg today"), time_compact, day_pages or 0)
     end
     local subtitle_lines = {}
     local goal_achieved, goal_progress, icon
-
+    local clean_look = getSettingWithDefault(SETTINGS.SHOW_GOAL_CLEAN_LOOK, USER_CONFIG.SHOW_GOAL_CLEAN_LOOK)
+    local show_goal_progress = not clean_look and getSettingWithDefault(SETTINGS.SHOW_GOAL_PROGRESS, USER_CONFIG.SHOW_GOAL_PROGRESS)
     if goal_type == "time" then
         local daily_goal_minutes = getSetting("DAILY_GOAL_MINUTES") or USER_CONFIG.DAILY_GOAL_MINUTES or 30
         local goal_seconds       = daily_goal_minutes * 60
@@ -916,7 +913,7 @@ local function buildGoalSection(ui, state, book_data, has_ui, total_width, color
             table.insert(subtitle_lines, string.format(_("%d/%d days met this week"), days_met, days_in_week))
         end
 
-        local show_detail = getSettingWithDefault(SETTINGS.SHOW_GOAL_PAGES, USER_CONFIG.SHOW_GOAL_PAGES)
+        local show_detail = (not clean_look) and getSettingWithDefault(SETTINGS.SHOW_GOAL_PAGES, USER_CONFIG.SHOW_GOAL_PAGES)
         if show_detail then
             local done_str   = formatDuration(day_dur_safe) or _("0 mins")
             local h          = math.floor(daily_goal_minutes / 60)
@@ -930,12 +927,18 @@ local function buildGoalSection(ui, state, book_data, has_ui, total_width, color
             else
                 target_str = string.format("%d %s", daily_goal_minutes, ngettext("min", "mins", daily_goal_minutes))
             end
-            local status = goal_achieved and _("Achieved!") or (goal_pct .. "%")
-            table.insert(subtitle_lines, string.format("%s · %s %s", status, target_str, _("goal")))
+            local status = goal_achieved and _("Achieved!") or (show_goal_progress and (goal_pct .. "%") or nil)
+            if status then
+                table.insert(subtitle_lines, string.format("%s · %s %s", status, target_str, _("goal")))
+            else
+                table.insert(subtitle_lines, string.format("%s %s", target_str, _("goal")))
+            end
         else
-            table.insert(subtitle_lines, goal_achieved
-                and _("Goal achieved!")
-                or string.format(_("%d%% of goal"), goal_pct))
+            if goal_achieved and not clean_look then
+                table.insert(subtitle_lines, _("Goal achieved!"))
+            elseif show_goal_progress then
+                table.insert(subtitle_lines, string.format(_("%d%% of goal"), goal_pct))
+            end
         end
 
     else
@@ -952,15 +955,21 @@ local function buildGoalSection(ui, state, book_data, has_ui, total_width, color
             table.insert(subtitle_lines, string.format(_("%d/%d days met this week"), days_met, days_in_week))
         end
 
-        local show_goal_pages = getSettingWithDefault(SETTINGS.SHOW_GOAL_PAGES, USER_CONFIG.SHOW_GOAL_PAGES)
+        local show_goal_pages = (not clean_look) and getSettingWithDefault(SETTINGS.SHOW_GOAL_PAGES, USER_CONFIG.SHOW_GOAL_PAGES)
         if show_goal_pages then
-            local status = goal_achieved and _("Achieved!") or (goal_pct .. "%")
-            table.insert(subtitle_lines, string.format("%s · %s", status,
-                string.format(_("%d page goal"), daily_goal)))
+            local status = goal_achieved and _("Achieved!") or (show_goal_progress and (goal_pct .. "%") or nil)
+            if status then
+                table.insert(subtitle_lines, string.format("%s · %s", status,
+                    string.format(_("%d page goal"), daily_goal)))
+            else
+                table.insert(subtitle_lines, string.format(_("%d page goal"), daily_goal))
+            end
         else
-            table.insert(subtitle_lines, goal_achieved
-                and _("Goal achieved!")
-                or string.format(_("%d%% of goal"), goal_pct))
+            if goal_achieved and not clean_look then
+                table.insert(subtitle_lines, _("Goal achieved!"))
+            elseif show_goal_progress then
+                table.insert(subtitle_lines, string.format(_("%d%% of goal"), goal_pct))
+            end
         end
     end
 
