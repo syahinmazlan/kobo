@@ -50,6 +50,13 @@
 * **TOTAL:** Your total completion percentage at the end of that day.
 * **RANGE:** The specific page numbers covered (e.g., 10–45).
 
+### Managing Entries
+* **Delete a daily row:** On touch devices, **long-press any row** in the daily table.
+* A **confirmation prompt** appears before deletion.
+* If confirmed, all raw reading events for that **book + selected day** are removed.
+* The popup is then refreshed and all visible totals/stats are **recalculated automatically**.
+* Deletion is permanent for that day’s row.
+
 ---
 
 ## 📂 Installation

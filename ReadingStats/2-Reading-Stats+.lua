@@ -12,11 +12,13 @@ local DataStorage = require("datastorage")
 local Device = require("device")
 local Dispatcher = require("dispatcher")
 local Font = require("ui/font")
+local ConfirmBox = require("ui/widget/confirmbox")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local InfoMessage = require("ui/widget/infomessage")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
@@ -736,6 +738,8 @@ end
 
 local function buildTableRows(stats_data, fonts, layout)
     local rows = VerticalGroup:new{ align = "left" }
+    local hit_ranges = {}
+    local row_top = 0
     local today_iso = os.date("%Y-%m-%d")
     local highlight_latest = stats_data[1] and stats_data[1].date == today_iso
     for idx, item in ipairs(stats_data) do
@@ -769,13 +773,31 @@ local function buildTableRows(stats_data, fonts, layout)
         }
 
         table.insert(rows, row)
+        local row_h = row:getSize().h
+        table.insert(hit_ranges, { y_min = row_top, y_max = row_top + row_h, item = item })
+        row_top = row_top + row_h
         if idx < #stats_data then
             table.insert(rows, VerticalSpan:new{ height = Size.padding.tiny or 2 })
             table.insert(rows, buildRowSeparator(layout.full_width - 2 * layout.padding_h))
             table.insert(rows, VerticalSpan:new{ height = Size.padding.tiny or 2 })
+            row_top = row_top + (Size.padding.tiny or 2) + (Size.line.thin or 1) + (Size.padding.tiny or 2)
         end
     end
-    return rows
+    return rows, hit_ranges
+end
+
+local function deleteDailyRow(book_id, day_date)
+    if not book_id or not day_date then return false end
+    local conn = getDB()
+    if not conn then return false end
+    local sql = string.format([[
+        DELETE FROM page_stat_data
+        WHERE id_book = %d
+          AND date(start_time, 'unixepoch', 'localtime') = '%s';
+    ]], tonumber(book_id) or 0, tostring(day_date))
+    local ok = conn:exec(sql)
+    conn:close()
+    return ok ~= nil
 end
 
 local function buildPaginationBar(fonts, layout, current_page, total_pages)
@@ -885,6 +907,12 @@ function ReadingStatsTable:init()
         self.ges_events.TapClose = {
             GestureRange:new{
                 ges = "tap",
+                range = self.dimen,
+            }
+        }
+        self.ges_events.HoldRowDelete = {
+            GestureRange:new{
+                ges = "hold",
                 range = self.dimen,
             }
         }
@@ -1042,7 +1070,7 @@ function ReadingStatsTable:buildContent()
     }
 
     local header = buildTableHeader(self.fonts, self.layout)
-    local rows = buildTableRows(stats_data, self.fonts, self.layout)
+    local rows, row_hits = buildTableRows(stats_data, self.fonts, self.layout)
 
     local table_content = VerticalGroup:new{ align = "left" }
 
@@ -1073,6 +1101,9 @@ function ReadingStatsTable:buildContent()
         + header:getSize().h + rows_frame:getSize().h + summary_frame:getSize().h
 
     self._chart_hit = nil
+    self._rows_data = row_hits
+    self._rows_top_y = title_frame:getSize().h + stats_frame:getSize().h + header:getSize().h
+    self._rows_bottom_y = self._rows_top_y + rows_frame:getSize().h
 
     if has_pagination then
         local sep_line = LineWidget:new{
@@ -1149,6 +1180,56 @@ function ReadingStatsTable:onTapClose(arg, ges_ev)
     end
 
     UIManager:close(self)
+    return true
+end
+
+function ReadingStatsTable:onHoldRowDelete(arg, ges_ev)
+    if not (ges_ev and ges_ev.pos and self._rows_data and self.stats_plugin) then
+        return false
+    end
+    local ty = ges_ev.pos.y
+    if ty < (self._rows_top_y or 0) or ty > (self._rows_bottom_y or 0) then
+        return false
+    end
+
+    local rel_y = ty - (self._rows_top_y or 0) - (Size.padding.small or 4)
+    if rel_y < 0 then return false end
+
+    local target_item
+    for _, hit in ipairs(self._rows_data) do
+        if rel_y >= hit.y_min and rel_y <= hit.y_max then
+            target_item = hit.item
+            break
+        end
+    end
+    if not target_item or not target_item.date then
+        return false
+    end
+
+    local ui_ref = self.ui
+    local book_id = self.stats_plugin.id_curr_book
+    local day_date = target_item.date
+    local box
+    box = ConfirmBox:new{
+        text = string.format("Delete reading stats for %s?\nThis cannot be undone.", day_date),
+        ok_text = _("Delete"),
+        ok_callback = function()
+            UIManager:close(box)
+            if deleteDailyRow(book_id, day_date) then
+                UIManager:close(self)
+                UIManager:scheduleIn(0, function()
+                    UIManager:show(ReadingStatsTable:new{ ui = ui_ref })
+                end)
+            else
+                UIManager:show(InfoMessage:new{
+                    text = _("Failed to delete row."),
+                    timeout = 3,
+                })
+            end
+        end,
+        cancel_text = _("Cancel"),
+    }
+    UIManager:show(box)
     return true
 end
 
