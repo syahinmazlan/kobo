@@ -25,7 +25,7 @@ end
 
 function AIHelper.generate_summary(opts, input_text)
     if not opts or not opts.api_key or opts.api_key == "" then
-        return false, "Missing API key. Configure it in plugin settings."
+        return false, "Missing API key. Put it in HighContext/api_key.txt or plugin settings."
     end
 
     if not socket_http_ok or not ltn12_ok then
