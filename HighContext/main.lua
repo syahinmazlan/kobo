@@ -1,14 +1,24 @@
+local _plugin_dir = (debug.getinfo(1, "S").source:match("^@(.+)/[^/]+$") or ".") .. "/"
+
+if not package.path:find(_plugin_dir, 1, true) then
+    package.path = _plugin_dir .. "?.lua;" .. package.path
+end
+
 local Dispatcher = require("dispatcher")
 local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local _ = require("gettext")
 
-local AIHelper = require("HighContext.aihelper")
+local AIHelper = require("aihelper")
 
 local HighContext = WidgetContainer:extend{
     name = "highcontext",
 }
+
+local function trim(value)
+    return (value or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
 
 local function read_api_key_from_file(path)
     if not path or path == "" then
@@ -20,14 +30,7 @@ local function read_api_key_from_file(path)
     end
     local content = file:read("*a")
     file:close()
-    if not content then
-        return nil
-    end
-    local key = content:gsub("^%s+", ""):gsub("%s+$", "")
-    if key == "" then
-        return nil
-    end
-    return key
+    return trim(content) ~= "" and trim(content) or nil
 end
 
 function HighContext:onDispatcherRegisterActions()
@@ -43,7 +46,7 @@ function HighContext:init()
     self:onDispatcherRegisterActions()
     self.settings = G_reader_settings:readSetting("highcontext_settings", {
         api_key = "",
-        api_key_file = "HighContext/api_key.txt",
+        api_key_file = _plugin_dir .. "api_key.txt",
         endpoint = "https://api.openai.com/v1/chat/completions",
         model = "gpt-4o-mini",
         system_prompt = "Summarize the text with concise bullet points and key context.",
@@ -69,7 +72,7 @@ function HighContext:addToMainMenu(menu_items)
 end
 
 function HighContext:showApiKeyFileInfo()
-    local path = self.settings.api_key_file or "HighContext/api_key.txt"
+    local path = self.settings.api_key_file or (_plugin_dir .. "api_key.txt")
     UIManager:show(InfoMessage:new{
         text = _("Place your API key in: ") .. path,
         timeout = 6,
@@ -84,9 +87,12 @@ function HighContext:getCurrentPageText()
     if not ok_page or type(page) ~= "number" then
         return nil
     end
-    local ok_text, text = pcall(function() return self.ui.document:getPageText(page) end)
-    if ok_text and type(text) == "string" and text ~= "" then
-        return text
+
+    if self.ui.document.getPageText then
+        local ok_text, text = pcall(function() return self.ui.document:getPageText(page) end)
+        if ok_text and type(text) == "string" and text ~= "" then
+            return text
+        end
     end
     return nil
 end
@@ -105,7 +111,9 @@ function HighContext:onHighContextSummarizePage()
     for k, v in pairs(self.settings) do
         runtime_settings[k] = v
     end
-    runtime_settings.api_key = read_api_key_from_file(self.settings.api_key_file) or self.settings.api_key
+
+    local key_from_file = read_api_key_from_file(self.settings.api_key_file)
+    runtime_settings.api_key = key_from_file or self.settings.api_key
 
     local progress = InfoMessage:new{ text = _("HighContext: generating summary...") }
     UIManager:show(progress)
@@ -116,6 +124,10 @@ function HighContext:onHighContextSummarizePage()
         text = ok and result or (_("HighContext failed: ") .. result),
         timeout = 8,
     })
+end
+
+function HighContext:onHighContextSummarizePageAction()
+    self:onHighContextSummarizePage()
 end
 
 return HighContext
