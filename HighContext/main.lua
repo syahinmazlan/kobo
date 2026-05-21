@@ -1,41 +1,38 @@
+local _plugin_dir = (debug.getinfo(1, "S").source:match("^@(.+)/[^/]+$") or ".") .. "/"
+
+if not package.path:find(_plugin_dir, 1, true) then
+    package.path = _plugin_dir .. "?.lua;" .. package.path
+end
+
 local Dispatcher = require("dispatcher")
 local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local _ = require("gettext")
 
-local AIHelper = require("HighContext.aihelper")
+local AIHelper = require("aihelper")
 
 local HighContext = WidgetContainer:extend{
     name = "highcontext",
 }
 
+local function trim(value)
+    return (value or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
 local function read_api_key_from_file(path)
-    if not path or path == "" then
-        return nil
-    end
+    if not path or path == "" then return nil end
     local file = io.open(path, "r")
-    if not file then
-        return nil
-    end
+    if not file then return nil end
     local content = file:read("*a")
     file:close()
-    if not content then
-        return nil
-    end
-    local key = content:gsub("^%s+", ""):gsub("%s+$", "")
-    if key == "" then
-        return nil
-    end
-    return key
+    return trim(content) ~= "" and trim(content) or nil
 end
 
 function HighContext:onDispatcherRegisterActions()
     Dispatcher:registerAction("highcontext_summarize_page", {
-        category = "none",
-        event = "HighContextSummarizePage",
-        title = _("HighContext: summarize page"),
-        general = true,
+        category = "none", event = "HighContextSummarizePage",
+        title = _("HighContext: summarize page"), general = true,
     })
 end
 
@@ -43,79 +40,104 @@ function HighContext:init()
     self:onDispatcherRegisterActions()
     self.settings = G_reader_settings:readSetting("highcontext_settings", {
         api_key = "",
-        api_key_file = "HighContext/api_key.txt",
+        api_key_file = _plugin_dir .. "api_key.txt",
         endpoint = "https://api.openai.com/v1/chat/completions",
         model = "gpt-4o-mini",
         system_prompt = "Summarize the text with concise bullet points and key context.",
+        clarify_system_prompt = "Explain the highlighted text in simple terms. Keep it concise and accurate.",
     })
     self.ui.menu:registerToMainMenu(self)
 end
 
 function HighContext:addToMainMenu(menu_items)
     menu_items.highcontext = {
-        text = _("HighContext"),
-        sorting_hint = "tools",
+        text = _("HighContext"), sorting_hint = "tools",
         sub_item_table = {
-            {
-                text = _("Summarize current page"),
-                callback = function() self:onHighContextSummarizePage() end,
-            },
-            {
-                text = _("API key file info"),
-                callback = function() self:showApiKeyFileInfo() end,
-            },
+            { text = _("Summarize current page"), callback = function() self:onHighContextSummarizePage() end },
+            { text = _("API key file info"), callback = function() self:showApiKeyFileInfo() end },
         },
     }
 end
 
 function HighContext:showApiKeyFileInfo()
-    local path = self.settings.api_key_file or "HighContext/api_key.txt"
-    UIManager:show(InfoMessage:new{
-        text = _("Place your API key in: ") .. path,
-        timeout = 6,
-    })
+    local path = self.settings.api_key_file or (_plugin_dir .. "api_key.txt")
+    UIManager:show(InfoMessage:new{ text = _("Place your API key in: ") .. path, timeout = 6 })
 end
 
 function HighContext:getCurrentPageText()
-    if not self.ui or not self.ui.document then
-        return nil
-    end
+    if not self.ui or not self.ui.document then return nil, _("Reader document is unavailable.") end
     local ok_page, page = pcall(function() return self.ui:getCurrentPage() end)
-    if not ok_page or type(page) ~= "number" then
-        return nil
+    if not ok_page or type(page) ~= "number" then return nil, _("Could not resolve current page.") end
+    local doc = self.ui.document
+    if doc.getPageText then
+        local ok_text, text = pcall(function() return doc:getPageText(page) end)
+        if ok_text and type(text) == "string" and trim(text) ~= "" then return text end
     end
-    local ok_text, text = pcall(function() return self.ui.document:getPageText(page) end)
-    if ok_text and type(text) == "string" and text ~= "" then
-        return text
+    if doc.getTextFromPage then
+        local ok_text2, text2 = pcall(function() return doc:getTextFromPage(page) end)
+        if ok_text2 and type(text2) == "string" and trim(text2) ~= "" then return text2 end
     end
-    return nil
+    if doc.getPageTextFromPositions then
+        local ok_text3, text3 = pcall(function() return doc:getPageTextFromPositions(page) end)
+        if ok_text3 and type(text3) == "string" and trim(text3) ~= "" then return text3 end
+    end
+    return nil, _("This document backend does not expose page text extraction.")
 end
 
-function HighContext:onHighContextSummarizePage()
-    local page_text = self:getCurrentPageText()
-    if not page_text then
-        UIManager:show(InfoMessage:new{
-            text = _("Could not read page text for this document/backend."),
-            timeout = 3,
-        })
+function HighContext:getRuntimeSettings()
+    local runtime_settings = {}
+    for k, v in pairs(self.settings) do runtime_settings[k] = v end
+    local key_from_file = read_api_key_from_file(self.settings.api_key_file)
+    runtime_settings.api_key = key_from_file or self.settings.api_key
+    return runtime_settings
+end
+
+function HighContext:runClarify(highlighted_text)
+    local selected = trim(highlighted_text or "")
+    if selected == "" and self.ui and self.ui.highlight and self.ui.highlight.getSelectedText then
+        local ok_sel, text = pcall(function() return self.ui.highlight:getSelectedText() end)
+        if ok_sel then selected = trim(text or "") end
+    end
+    if selected == "" then
+        UIManager:show(InfoMessage:new{ text = _("No highlighted text found."), timeout = 3 })
         return
     end
 
-    local runtime_settings = {}
-    for k, v in pairs(self.settings) do
-        runtime_settings[k] = v
-    end
-    runtime_settings.api_key = read_api_key_from_file(self.settings.api_key_file) or self.settings.api_key
+    local page_context = ""
+    local page_text = self:getCurrentPageText()
+    if type(page_text) == "string" then page_context = page_text end
 
+    local progress = InfoMessage:new{ text = _("HighContext: clarifying...") }
+    UIManager:show(progress)
+    local ok, result = AIHelper.generate_clarification(self:getRuntimeSettings(), selected, page_context)
+    UIManager:close(progress)
+    UIManager:show(InfoMessage:new{ text = ok and result or (_("HighContext failed: ") .. result), timeout = 10 })
+end
+
+function HighContext:addToSelectionMenu(menu_items, selected_text)
+    menu_items.highcontext_clarify = {
+        text = _("Clarify"),
+        callback = function() self:runClarify(selected_text) end,
+    }
+end
+
+function HighContext:addToHighlightDialog(highlight_dialog, menu_items, selected_text)
+    if type(menu_items) == "table" then
+        self:addToSelectionMenu(menu_items, selected_text)
+    end
+end
+
+function HighContext:onHighContextSummarizePage()
+    local page_text, read_error = self:getCurrentPageText()
+    if not page_text then
+        UIManager:show(InfoMessage:new{ text = read_error or _("Could not read page text for this document/backend."), timeout = 3 })
+        return
+    end
     local progress = InfoMessage:new{ text = _("HighContext: generating summary...") }
     UIManager:show(progress)
-    local ok, result = AIHelper.generate_summary(runtime_settings, page_text)
+    local ok, result = AIHelper.generate_summary(self:getRuntimeSettings(), page_text)
     UIManager:close(progress)
-
-    UIManager:show(InfoMessage:new{
-        text = ok and result or (_("HighContext failed: ") .. result),
-        timeout = 8,
-    })
+    UIManager:show(InfoMessage:new{ text = ok and result or (_("HighContext failed: ") .. result), timeout = 8 })
 end
 
 return HighContext
