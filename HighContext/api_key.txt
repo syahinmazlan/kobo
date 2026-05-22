@@ -1,3 +1,0 @@
-# Put your API key on the first line, without quotes.
-# Example:
-# sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
