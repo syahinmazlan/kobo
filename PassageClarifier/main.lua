@@ -7,7 +7,7 @@ local util = require("util")
 local _ = require("gettext")
 
 local ok_json, json = pcall(require, "json")
-local ok_http, http = pcall(require, "socket.http")
+local ok_https, https = pcall(require, "ssl.https")
 local ok_ltn12, ltn12 = pcall(require, "ltn12")
 
 local PassageClarifier = WidgetContainer:extend{
@@ -60,10 +60,12 @@ end
 
 function PassageClarifier:init()
     self:registerHighlightButton()
+    self:registerDictButton()
 end
 
 function PassageClarifier:onReaderReady()
     self:registerHighlightButton()
+    self:registerDictButton()
 end
 
 function PassageClarifier:registerHighlightButton()
@@ -86,27 +88,93 @@ function PassageClarifier:registerHighlightButton()
     self._highlight_button_registered = true
 end
 
+local function get_dict_lookup_text(dict_widget)
+    if dict_widget.highlight and dict_widget.highlight.selected_text and dict_widget.highlight.selected_text.text then
+        return clean_text(dict_widget.highlight.selected_text.text)
+    end
+    if dict_widget.word then return clean_text(dict_widget.word) end
+    if dict_widget.lookupword then return clean_text(dict_widget.lookupword) end
+    if dict_widget.displayword then return clean_text(dict_widget.displayword) end
+    return ""
+end
+
+local function layout_contains_button(layout, button_id)
+    if not layout then return false end
+    for _, row in ipairs(layout) do
+        for _, id in ipairs(row) do
+            if id == button_id then return true end
+        end
+    end
+    return false
+end
+
+local function insert_dict_button(layout, button_id)
+    if not layout or layout_contains_button(layout, button_id) then return false end
+    for _, row in ipairs(layout) do
+        if layout_contains_button({ row }, "wikipedia") or layout_contains_button({ row }, "search") then
+            table.insert(row, #row, button_id)
+            return true
+        end
+    end
+    table.insert(layout, { button_id })
+    return true
+end
+
+function PassageClarifier:registerDictButton()
+    if self._dict_button_registered then return end
+    if not self.ui or not self.ui.dictionary or not self.ui.dictionary.addToDictButtons then return end
+
+    self.ui.dictionary:addToDictButtons({
+        id = "clarify",
+        menu_text = _("Clarify"),
+        text = _("Clarify"),
+        callback = function(dict_widget)
+            local selected = get_dict_lookup_text(dict_widget)
+            dict_widget:onClose(true)
+            self:clarify(selected)
+        end,
+    })
+
+    -- Put Clarify beside the built-in dictionary actions on default layouts.
+    insert_dict_button(self.ui.dictionary.default_layout, "clarify")
+
+    -- If the user has customized dictionary buttons, update that saved layout too.
+    if G_reader_settings then
+        local config = G_reader_settings:readSetting("dict_button_config")
+        if config and insert_dict_button(config.layout, "clarify") then
+            config.order = config.order or {}
+            local in_order = false
+            for _, id in ipairs(config.order) do
+                if id == "clarify" then
+                    in_order = true
+                    break
+                end
+            end
+            if not in_order then
+                table.insert(config.order, "clarify")
+            end
+            config.row_count = config.row_count or {}
+            for i, row in ipairs(config.layout) do
+                config.row_count[i] = config.row_count[i] or #row
+            end
+            G_reader_settings:saveSetting("dict_button_config", config)
+        end
+    end
+
+    self._dict_button_registered = true
+end
+
 -- DictQuickLookup emits DictButtonsReady before drawing the dictionary popup.
 -- This adds Clarify to the dictionary popup shown after a word lookup.
 function PassageClarifier:onDictButtonsReady(dict_widget, buttons)
     if not dict_widget or not buttons then return end
-
-    local function get_selected_text()
-        if dict_widget.highlight and dict_widget.highlight.selected_text and dict_widget.highlight.selected_text.text then
-            return clean_text(dict_widget.highlight.selected_text.text)
-        end
-        if dict_widget.word then return clean_text(dict_widget.word) end
-        if dict_widget.lookupword then return clean_text(dict_widget.lookupword) end
-        if dict_widget.displayword then return clean_text(dict_widget.displayword) end
-        return ""
-    end
 
     table.insert(buttons, 2, {
         {
             id = "clarify",
             text = _("Clarify"),
             callback = function()
-                local selected = get_selected_text()
+                local selected = get_dict_lookup_text(dict_widget)
                 dict_widget:onClose(true)
                 self:clarify(selected)
             end,
@@ -121,8 +189,13 @@ function PassageClarifier:clarify(selected_text)
         return
     end
 
-    if not ok_json or not ok_http or not ok_ltn12 then
-        UIManager:show(InfoMessage:new{ text = _("Missing JSON or HTTP library in this KOReader build.") })
+    if not ok_json or not ok_ltn12 then
+        UIManager:show(InfoMessage:new{ text = _("Missing JSON or LTN12 library in this KOReader build.") })
+        return
+    end
+
+    if not ok_https then
+        UIManager:show(InfoMessage:new{ text = _("Missing HTTPS library in this KOReader build.") })
         return
     end
 
@@ -133,9 +206,17 @@ function PassageClarifier:clarify(selected_text)
         return
     end
 
-    UIManager:show(InfoMessage:new{ text = _("Clarifying selected passage...") })
+    local loading_message = InfoMessage:new{ text = _("Clarifying selected passage...") }
+    UIManager:show(loading_message)
 
     UIManager:scheduleIn(0.1, function()
+        local function close_loading_message()
+            if loading_message then
+                UIManager:close(loading_message)
+                loading_message = nil
+            end
+        end
+
         local prompt = table.concat({
             "Clarify this selected passage for a reader.",
             "Use these sections only:",
@@ -156,7 +237,7 @@ function PassageClarifier:clarify(selected_text)
         })
 
         local chunks = {}
-        local ok_req, code, headers, status = http.request{
+        local ok_req, code, headers, status = https.request{
             url = "https://api.openai.com/v1/responses",
             method = "POST",
             headers = {
@@ -170,6 +251,7 @@ function PassageClarifier:clarify(selected_text)
 
         local body = table.concat(chunks)
         if not ok_req or tonumber(code) ~= 200 then
+            close_loading_message()
             UIManager:show(TextViewer:new{
                 title = _("Clarify error"),
                 text = "Request failed.\n\nStatus: " .. tostring(status or code) .. "\n\n" .. body,
@@ -179,10 +261,12 @@ function PassageClarifier:clarify(selected_text)
 
         local ok_decode, decoded = pcall(json.decode, body)
         if not ok_decode then
+            close_loading_message()
             UIManager:show(TextViewer:new{ title = _("Clarify error"), text = "Could not decode API response.\n\n" .. body })
             return
         end
 
+        close_loading_message()
         UIManager:show(TextViewer:new{
             title = _("Clarification"),
             text = extract_output_text(decoded) or "No explanation returned.",
